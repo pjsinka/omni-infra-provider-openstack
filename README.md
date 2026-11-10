@@ -4,9 +4,9 @@ OpenStack infrastructure provider for [Omni](https://omni.siderolabs.com):
 provisions Talos machines as Nova servers, declaratively, driven by Omni
 machine classes.
 
-Status: **proven end-to-end** — a Talos cluster born from OpenStack via
+Status: **v0.1.0 released** — a Talos cluster born from OpenStack via
 self-hosted Omni, surviving a full host reboot (stateless provider, state
-lives in Omni). Brewing toward publication.
+lives in Omni).
 
 ## Highlights
 
@@ -78,6 +78,9 @@ credential); the provider reads them itself — never commit them.
 
 ## OCI Image
 
+Prebuilt multi-arch image (amd64/arm64):
+`ghcr.io/pjsinka/omni-infra-provider-openstack:v0.1.0`
+
     docker build -t omni-infra-provider-openstack:test .
 
 Two stages: `golang:1.27-alpine` build (CGO disabled) → `alpine:3.22`
@@ -96,7 +99,8 @@ runtime with CA certificates. On the target host build natively
 - [x] Guild parity: additional NICs (per-port security groups);
       system extensions flow via cluster templates (Omni-native)
 - [ ] Floating IPs, access-rule hardening, pb.go regeneration (protoc)
-- [ ] Multi-arch builds, E2E suite, publication
+- [x] Multi-arch builds (GHCR amd64/arm64), publication (v0.1.0)
+- [ ] E2E suite
 
 ## License
 
