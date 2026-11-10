@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/schema#",
+  "type": "object",
+  "properties": {
+    "flavor": {
+      "type": "string",
+      "description": "Nova flavor name or ID for the machine.",
+      "default": "m1.small"
+    },
+    "network": {
+      "type": "string",
+      "description": "Neutron network name or ID the machine port is created in."
+    },
+    "security_groups": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Security group names or IDs for the machine port. Must allow egress to Omni (SideroLink).",
+      "default": ["default"]
+    },
+    "disk_size": {
+      "type": "integer",
+      "description": "Boot volume size in GB.",
+      "default": 20
+    },
+    "volume_type": {
+      "type": "string",
+      "description": "Optional Cinder volume type for the boot volume (requires compute API microversion 2.67+)."
+    },
+    "availability_zone": {
+      "type": "string",
+      "description": "Nova availability zone: a concrete zone name, or \"auto\" to rotate across all zones read live from Nova (stateless round-robin per machine). Empty leaves the choice to Nova's default."
+    },
+    "architecture": {
+      "type": "string",
+      "description": "Talos image architecture.",
+      "default": "amd64"
+    },
+    "server_group": {
+      "type": "string",
+      "description": "Optional Nova server group (name or ID) whose policy spreads the machines, e.g. created with: openstack server group create --policy soft-anti-affinity <name>. Use one group per machine class (control planes separate from workers) so Nova places machines on different compute hosts."
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Optional key/value metadata attached to the server (billing, ownership, ...).",
+      "additionalProperties": { "type": "string" }
+    },
+    "additional_disks": {
+      "type": "array",
+      "description": "Additional Cinder volumes attached to the machine (e.g. for Longhorn).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "size_gb": { "type": "integer" },
+          "volume_type": { "type": "string" }
+        },
+        "required": ["size_gb"]
+      }
+    },
+    "additional_nics": {
+      "type": "array",
+      "description": "Additional network interfaces: each entry creates a Neutron port in the given network (name or ID) and attaches it to the machine. Ports are named <machine>-nic-<n> and cleaned up with the machine.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "network": { "type": "string" },
+          "security_groups": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["network"]
+      }
+    }
+  },
+  "required": ["flavor", "network", "disk_size", "architecture"]
+}

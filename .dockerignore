@@ -1,0 +1,4 @@
+bin/
+.git/
+dist/
+*.tar.gz
