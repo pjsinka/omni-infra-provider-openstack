@@ -1,0 +1,19 @@
+# MachineSet allocating one machine from the omni-e2e-mc machine class.
+# Field names (updatestrategy, machineallocation, allocationtype) follow the
+# official Omni example from "Write an Infrastructure Providers"
+# (docs.sidero.dev, omni/infrastructure-and-extensions/writing-infrastructure-providers):
+# updatestrategy 1 = Rolling, allocationtype 0 = static allocation.
+#
+# Applying this resource makes Omni create a MachineRequest which our
+# provider provisions as a Nova server (flavor m1.small, boot volume 10G,
+# port with security group e2e-sg in network "private").
+metadata:
+    namespace: default
+    type: MachineSets.omni.sidero.dev
+    id: omni-e2e-ms
+spec:
+    updatestrategy: 1
+    machineallocation:
+        name: omni-e2e-mc
+        machinecount: 1
+        allocationtype: 0

@@ -1,0 +1,26 @@
+# MachineClass for the Tier-2 e2e run: a single m1.small machine booted from
+# a Cinder volume in DevStack's "private" network. Structure follows the
+# official Omni example from "Write an Infrastructure Provider"
+# (docs.sidero.dev, omni/infrastructure-and-extensions/writing-infrastructure-providers).
+#
+# providerdata schema: internal/pkg/provider/data/schema.json
+# providerid must match meta.ProviderID ("openstack") — Omni labels the
+# machine requests with it and the provider only claims matching requests.
+metadata:
+    namespace: default
+    type: MachineClasses.omni.sidero.dev
+    id: omni-e2e-mc
+spec:
+    autoprovision:
+        providerid: openstack
+        kernelargs: []
+        metavalues: []
+        providerdata: |
+            flavor: m1.small
+            network: private
+            disk_size: 10
+            architecture: amd64
+            security_groups: [e2e-sg]
+            metadata:
+                managed-by: omni-infra-provider-openstack
+        grpctunnel: 0

@@ -66,6 +66,153 @@ jobs:
           cat /tmp/omni/list.txt
           grep -qE 'OpenStack infrastructure provider +true' /tmp/omni/list.txt
 
+      - name: Ensure security group e2e-sg (idempotent)
+        run: |
+          set -euo pipefail
+          OPENSTACK_BIN=""
+          for cand in /opt/stack/data/venv/bin/openstack /opt/stack/.venv/bin/openstack /opt/stack/venv/bin/openstack; do
+            if [[ -x "$cand" ]]; then OPENSTACK_BIN="$cand"; break; fi
+          done
+          [[ -n "$OPENSTACK_BIN" ]] || { echo "FATAL: no openstack binary found"; exit 1; }
+          echo "openstack binary: $OPENSTACK_BIN"
+          # Export for all following steps.
+          echo "OPENSTACK_BIN=$OPENSTACK_BIN" >> "$GITHUB_ENV"
+          if "$OPENSTACK_BIN" security group show e2e-sg >/dev/null 2>&1; then
+            echo "e2e-sg exists already"
+          else
+            "$OPENSTACK_BIN" security group create e2e-sg --description "omni e2e machines: all egress allowed"
+            # Rules only on create, keeps the step idempotent; the machine
+            # needs egress to reach Omni (SideroLink) once it boots.
+            "$OPENSTACK_BIN" security group rule create e2e-sg --egress --protocol any --remote-ip 0.0.0.0/0
+          fi
+          "$OPENSTACK_BIN" security group show e2e-sg -f yaml
+
+      - name: Apply machineclass + machineset (provisioning starts)
+        run: |
+          set -euo pipefail
+          export OMNI_ENDPOINT=https://localhost:8080
+          export OMNI_SERVICE_ACCOUNT_KEY="$(sudo cat /tmp/omni/bootstrap-sa.key)"
+          # Baseline counts for the cleanup check: only OUR server/volume/port
+          # must be gone at the end; devstack infrastructure ports must stay.
+          BASE_SERVERS="$("$OPENSTACK_BIN" server list -f value -c ID | grep -c . || true)"
+          BASE_VOLUMES="$("$OPENSTACK_BIN" volume list -f value -c ID | grep -c . || true)"
+          BASE_PORTS="$("$OPENSTACK_BIN" port list -f value -c ID | grep -c . || true)"
+          echo "baseline: servers=$BASE_SERVERS volumes=$BASE_VOLUMES ports=$BASE_PORTS"
+          {
+            echo "BASE_SERVERS=$BASE_SERVERS"
+            echo "BASE_VOLUMES=$BASE_VOLUMES"
+            echo "BASE_PORTS=$BASE_PORTS"
+          } >> "$GITHUB_ENV"
+          /tmp/omni/bin/omnictl --insecure-skip-tls-verify apply -f e2e/testdata/machineclass.yaml
+          /tmp/omni/bin/omnictl --insecure-skip-tls-verify apply -f e2e/testdata/machineset.yaml
+          echo '--- machineclass (as stored by omni) ---'
+          /tmp/omni/bin/omnictl --insecure-skip-tls-verify get machineclasses.omni.sidero.dev omni-e2e-mc -o yaml
+          echo '--- machineset (as stored by omni) ---'
+          /tmp/omni/bin/omnictl --insecure-skip-tls-verify get machineSets.omni.sidero.dev omni-e2e-ms -o yaml
+
+      - name: Poll machinerequest + nova server until ACTIVE (max 20 min)
+        run: |
+          set -euo pipefail
+          export OMNI_ENDPOINT=https://localhost:8080
+          export OMNI_SERVICE_ACCOUNT_KEY="$(sudo cat /tmp/omni/bootstrap-sa.key)"
+          deadline=$((SECONDS + 1200))
+          last_req_hash=""
+          req_id=""
+          while (( SECONDS < deadline )); do
+            req="$("/tmp/omni/bin/omnictl" --insecure-skip-tls-verify get MachineRequests.omni.sidero.dev -n infra-provider -o yaml 2>&1 || true)"
+            req_hash="$(printf '%s' "$req" | cksum | cut -d' ' -f1)"
+            if [[ "$req_hash" != "$last_req_hash" ]]; then
+              echo "--- machinerequest (changed; cksum $req_hash) ---"
+              printf '%s\n' "$req"
+              last_req_hash="$req_hash"
+            fi
+            if [[ -z "$req_id" ]]; then
+              req_id="$(printf '%s\n' "$req" | awk '/^metadata:/{m=1;next} m && /^    id: /{sub(/^    id: /,""); print; exit}')"
+              if [[ -n "$req_id" ]]; then
+                echo "machine request id: $req_id"
+                echo "REQ_ID=$req_id" >> "$GITHUB_ENV"
+              fi
+            fi
+            line="$("$OPENSTACK_BIN" server list -f value -c ID -c Name -c Status 2>/dev/null | head -1 || true)"
+            if [[ -n "$line" ]]; then
+              echo "nova: $line"
+              status="${line##* }"
+              if [[ "$status" == "ACTIVE" ]]; then
+                echo "server reached ACTIVE"
+                exit 0
+              fi
+            fi
+            sleep 30
+          done
+          echo "FATAL: no server reached ACTIVE within 20 minutes"
+          exit 1
+
+      - name: Verify server flavor/volume/port (m1.small, 10G, e2e-sg, private)
+        run: |
+          set -euo pipefail
+          [[ -n "${REQ_ID:-}" ]] || { echo "FATAL: REQ_ID missing - check poll step log for the machinerequest YAML format"; exit 1; }
+          server_id="$("$OPENSTACK_BIN" server list -f json | jq -r --arg n "$REQ_ID" '.[] | select(.Name == $n) | .ID')"
+          [[ -n "$server_id" ]] || { echo "FATAL: no nova server named '$REQ_ID'"; "$OPENSTACK_BIN" server list; exit 1; }
+          echo "--- server show ---"
+          "$OPENSTACK_BIN" server show "$server_id" -f json > /tmp/server.json
+          "$OPENSTACK_BIN" server show "$server_id" -f yaml
+          flavor="$(jq -r '.flavor.original_name' /tmp/server.json)"
+          managed="$(jq -r '.metadata["managed-by"] // empty' /tmp/server.json)"
+          status="$(jq -r '.status' /tmp/server.json)"
+          [[ "$flavor" == "m1.small" ]] || { echo "FAIL: flavor=$flavor (want m1.small)"; exit 1; }
+          [[ "$managed" == "omni-infra-provider-openstack" ]] || { echo "FAIL: managed-by=$managed"; exit 1; }
+          [[ "$status" == "ACTIVE" ]] || { echo "FAIL: status=$status (want ACTIVE)"; exit 1; }
+
+          echo '--- volume list ---'
+          "$OPENSTACK_BIN" volume list -f json > /tmp/volumes.json
+          jq -r '.[] | "\(.id) size=\(.size) status=\(.status) name=\(.name)"' /tmp/volumes.json
+          vol_count="$(jq 'length' /tmp/volumes.json)"
+          vol_expect=$((BASE_VOLUMES + 1))
+          [[ "$vol_count" == "$vol_expect" ]] || { echo "FAIL: expected $vol_expect volumes (baseline+1), got $vol_count"; exit 1; }
+          # The new volume is the one attached to our server; find it explicitly.
+          vol_id="$(jq -r --arg s "$server_id" '.[] | select((.attachments // []) | map(.server_id == $s) | any) | .ID' /tmp/volumes.json)"
+          [[ -n "$vol_id" ]] || { echo "FAIL: no volume attached to server $server_id"; exit 1; }
+          vol_size="$(jq -r --arg v "$vol_id" '.[] | select(.ID == $v) | .size' /tmp/volumes.json)"
+          vol_status="$(jq -r --arg v "$vol_id" '.[] | select(.ID == $v) | .status' /tmp/volumes.json)"
+          [[ "$vol_size" == "10" ]] || { echo "FAIL: volume size=$vol_size (want 10)"; exit 1; }
+          [[ "$vol_status" == "in-use" ]] || { echo "FAIL: volume status=$vol_status (want in-use)"; exit 1; }
+
+          echo '--- port list ---'
+          "$OPENSTACK_BIN" port list --server "$server_id" -f json > /tmp/ports.json
+          port_count="$(jq 'length' /tmp/ports.json)"
+          [[ "$port_count" == "1" ]] || { echo "FAIL: expected exactly 1 port on the server, got $port_count"; exit 1; }
+          port_net="$(jq -r '.[0].network_id' /tmp/ports.json)"
+          private_id="$("$OPENSTACK_BIN" network show private -f value -c id)"
+          [[ "$port_net" == "$private_id" ]] || { echo "FAIL: port network $port_net != private ($private_id)"; exit 1; }
+          sg_id="$("$OPENSTACK_BIN" security group show e2e-sg -f value -c id)"
+          jq -e --arg sg "$sg_id" '.[0].security_groups | index($sg) != null' /tmp/ports.json >/dev/null \
+            || { echo "FAIL: port security_groups do not contain e2e-sg ($sg_id)"; exit 1; }
+          echo "ALL VERIFICATIONS PASSED"
+
+      - name: Deprovision machineset + verify cleanup
+        run: |
+          set -euo pipefail
+          export OMNI_ENDPOINT=https://localhost:8080
+          export OMNI_SERVICE_ACCOUNT_KEY="$(sudo cat /tmp/omni/bootstrap-sa.key)"
+          /tmp/omni/bin/omnictl --insecure-skip-tls-verify delete machineSets.omni.sidero.dev omni-e2e-ms
+          deadline=$((SECONDS + 600))
+          while (( SECONDS < deadline )); do
+            s="$("$OPENSTACK_BIN" server list -f value -c ID | grep -c . || true)"
+            v="$("$OPENSTACK_BIN" volume list -f value -c ID | grep -c . || true)"
+            p="$("$OPENSTACK_BIN" port list -f value -c ID | grep -c . || true)"
+            echo "cleanup poll: servers=$s (base $BASE_SERVERS) volumes=$v (base $BASE_VOLUMES) ports=$p (base $BASE_PORTS)"
+            if [[ "$s" == "$BASE_SERVERS" && "$v" == "$BASE_VOLUMES" && "$p" == "$BASE_PORTS" ]]; then
+              echo "CLEANUP COMPLETE (back to baseline)"
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "FATAL: cleanup incomplete after 10 minutes"
+          "$OPENSTACK_BIN" server list
+          "$OPENSTACK_BIN" volume list
+          "$OPENSTACK_BIN" port list
+          exit 1
+
       - name: Log tails (diagnostics)
         if: always()
         run: |
