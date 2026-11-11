@@ -83,18 +83,32 @@ fi
 } > "$WORKDIR/devstack/local.conf"
 chmod 600 "$WORKDIR/devstack/local.conf"
 
+# --- strip postgres server-dev from devstack's package lists (we run MySQL) ----
+# files/debs/neutron-common requests postgresql-server-dev-all, which drags
+# the versioned postgresql-18 chain (client-18, server-dev-18) into the
+# apt transaction. On the GitHub runner image that chain deadlocks apt's
+# resolver (Runs 5+7: postgresql-client-18 18.6 "not selected for install"
+# while 18.3-1 is the second candidate). Devstack with MySQL never needs
+# the postgres server packages — psycopg2-style clients use libpq-dev,
+# which stays in files/debs/general.
+sed -i '/postgresql-server-dev-all/d' "$WORKDIR/devstack/files/debs/neutron-common"
+
 # --- apt: refresh indexes + resolve runner-image package drift ------------------
 # The GitHub runner image ships packages from image-build time. When the
-# Ubuntu archive has moved on (security/point updates), stack.sh's
-# "apt-get install" transaction fails on exact-version dependencies
-# (observed: apache2-bin preinstalled one point-release behind the archive
-# apache2 that depends on it; postgresql-client-18 blocked likewise).
-# dist-upgrade brings every preinstalled package to current archive
-# versions first; safe on a throwaway runner, ~2 min.
-# Firefox must go first: on Ubuntu the firefox deb is a transitional stub
-# whose postinst installs the Firefox SNAP from the snap store; the store
-# is unreachable on GitHub runners and the postinst then retries every
-# minute for 30 minutes. DevStack needs no browser.
+# Ubuntu archive has moved on, apt transactions hit exact-version
+# dependencies of preinstalled older versions (Run 5: apache2-bin — fixed
+# by dist-upgrade; Runs 5+7: the postgres-18 chain — fixed by the strip
+# above). Diagnostics below end up in the CI log (holds, sources,
+# preinstalled postgres) and unhold clears image-time package holds.
+echo "=== apt holds ==="
+sudo apt-mark showhold || true
+echo "=== apt sources.d ==="
+ls -l /etc/apt/sources.list.d/ || true
+echo "=== installed postgres packages ==="
+dpkg -l | grep -E '^ii +postgresql' || true
+sudo apt-mark unhold $(sudo apt-mark showhold) 2>/dev/null || true
+# Firefox: its transitional deb installs a SNAP from the store, which is
+# unreachable on runners (Run 6 hung 30 min in the retry loop).
 sudo apt-get -y purge firefox
 sudo apt-get update
 sudo DEBIAN_FRONTEND=noninteractive apt-get -y dist-upgrade
