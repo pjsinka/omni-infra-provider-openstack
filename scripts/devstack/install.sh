@@ -211,9 +211,16 @@ fi
 
 CLOUDS_FILE="$HOME/${CLOUD_NAME}-clouds.yaml"
 umask 177
+# auth_type must be explicit: Run 12 showed the CLI's auth-method guessing
+# falls back to v3password ("No password entered...") even when
+# application_credential_id/secret are present in the auth section —
+# guessing is best-effort per the OSC docs. The cloud-level key is what
+# openstacksdk (openstack CLI) and gophercloud's clientconfig (our
+# provider's config path) read.
 cat > "$CLOUDS_FILE" <<EOF
 clouds:
   $CLOUD_NAME:
+    auth_type: v3applicationcredential
     auth:
       auth_url: http://127.0.0.1/identity
       application_credential_id: $APP_CRED_ID
