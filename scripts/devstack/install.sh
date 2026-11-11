@@ -91,6 +91,11 @@ chmod 600 "$WORKDIR/devstack/local.conf"
 # apache2 that depends on it; postgresql-client-18 blocked likewise).
 # dist-upgrade brings every preinstalled package to current archive
 # versions first; safe on a throwaway runner, ~2 min.
+# Firefox must go first: on Ubuntu the firefox deb is a transitional stub
+# whose postinst installs the Firefox SNAP from the snap store; the store
+# is unreachable on GitHub runners and the postinst then retries every
+# minute for 30 minutes. DevStack needs no browser.
+sudo apt-get -y purge firefox
 sudo apt-get update
 sudo DEBIAN_FRONTEND=noninteractive apt-get -y dist-upgrade
 
