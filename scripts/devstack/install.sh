@@ -230,12 +230,57 @@ unset OS_AUTH_URL OS_USERNAME OS_PASSWORD OS_PROJECT_NAME OS_USER_DOMAIN_NAME \
 export OS_CLOUD="$CLOUD_NAME"
 export OS_CLIENT_CONFIG_FILE="$CLOUDS_FILE"
 
-if ! "$OPENSTACK_BIN" token issue -f value -c id > /dev/null 2>/dev/null; then
+# Structure check of the clouds file: KEY NAMES and LENGTHS only — never
+# values. Devstack's venv python is used because os-client-config (an
+# openstack client dependency) guarantees PyYAML is installed there.
+VENV_PYTHON="/opt/stack/data/venv/bin/python3"
+[[ -x "$VENV_PYTHON" ]] || VENV_PYTHON="$(command -v python3)"
+"$VENV_PYTHON" - "$CLOUDS_FILE" "$CLOUD_NAME" <<'PYEOF' || true
+import sys
+try:
+    import yaml
+except ImportError:
+    print("clouds-file: python yaml module unavailable")
+    sys.exit(0)
+try:
+    with open(sys.argv[1]) as f:
+        data = yaml.safe_load(f)
+    cloud = data["clouds"][sys.argv[2]]
+    auth = cloud["auth"]
+    print("clouds-file: cloud keys:", ",".join(sorted(cloud.keys())))
+    print("clouds-file: auth keys:", ",".join(sorted(auth.keys())))
+    print("clouds-file: id-len:", len(auth.get("application_credential_id") or ""))
+    print("clouds-file: secret-len:", len(auth.get("application_credential_secret") or ""))
+except Exception as e:
+    print("clouds-file: ERROR:", type(e).__name__, e)
+PYEOF
+
+# The app credential secret is add-masked before this point, so stderr can
+# be shown: it carries keystone's error message, not the secret itself.
+STDERR_FILE="$(mktemp)"
+set +e
+"$OPENSTACK_BIN" token issue -f value -c id > /dev/null 2>"$STDERR_FILE"
+TOKEN_VERIFY_EXIT=$?
+TOKEN_VERIFY_STDERR="$(cat "$STDERR_FILE")"
+set -e
+echo "verify token: exit=$TOKEN_VERIFY_EXIT stderr-bytes=${#TOKEN_VERIFY_STDERR}"
+if [[ -n "$TOKEN_VERIFY_STDERR" ]]; then printf 'verify stderr: %s\n' "$TOKEN_VERIFY_STDERR"; fi
+if [[ "$TOKEN_VERIFY_EXIT" -ne 0 ]]; then
   echo "verify failed: token issue via app credential (cloud '$CLOUD_NAME')" >&2
+  rm -f "$STDERR_FILE"
   exit 1
 fi
-if ! "$OPENSTACK_BIN" flavor list -f value -c Name 2>/dev/null | grep -qx m1.small; then
-  echo "verify failed: m1.small missing from flavor list (cloud '$CLOUD_NAME')" >&2
+
+set +e
+FLAVOR_LIST="$("$OPENSTACK_BIN" flavor list -f value -c Name 2>"$STDERR_FILE")"
+FLAVOR_EXIT=$?
+FLAVOR_STDERR="$(cat "$STDERR_FILE")"
+rm -f "$STDERR_FILE"
+set -e
+echo "verify flavor: exit=$FLAVOR_EXIT stderr-bytes=${#FLAVOR_STDERR} m1.small-present=$(grep -qx m1.small <<<"$FLAVOR_LIST" && echo yes || echo no)"
+if [[ -n "$FLAVOR_STDERR" ]]; then printf 'flavor stderr: %s\n' "$FLAVOR_STDERR"; fi
+if [[ "$FLAVOR_EXIT" -ne 0 ]] || ! grep -qx m1.small <<<"$FLAVOR_LIST"; then
+  echo "verify failed: m1.small missing or flavor list failed (cloud '$CLOUD_NAME')" >&2
   exit 1
 fi
 echo "devstack ready: cloud '$CLOUD_NAME' authenticates, m1.small present, clouds file: $CLOUDS_FILE"
