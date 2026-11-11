@@ -30,6 +30,7 @@ func newTestClient(t *testing.T, handler http.Handler) *Client {
 	}
 
 	compute := *base
+	compute.Type = "compute" // set by NewServiceClient; drives the microversion header
 	compute.Microversion = "2.67"
 
 	return &Client{
@@ -41,21 +42,17 @@ func newTestClient(t *testing.T, handler http.Handler) *Client {
 	}
 }
 
-// serverBody decodes a POST /servers request body and returns the inner
-// "server" object.
+// serverBody decodes a JSON request body into a generic map. It pins
+// the exact wire contract of provider requests, including top-level
+// keys such as scheduler_hints.
 func serverBody(t *testing.T, r *http.Request) map[string]any {
 	t.Helper()
 
 	var body map[string]any
 
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		t.Fatalf("decoding server create body: %v", err)
+		t.Fatalf("decoding request body: %v", err)
 	}
 
-	server, ok := body["server"].(map[string]any)
-	if !ok {
-		t.Fatalf("no server object in create body: %v", body)
-	}
-
-	return server
+	return body
 }
