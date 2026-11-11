@@ -1,14 +1,20 @@
 name: spike
 # Throwaway debug workflow for the Tier-2 e2e bring-up (deleted in Task 5).
-# Task 1 scope: omni bootstrap + infra provider registration, NO DevStack
-# and NO provider start (the provider initializes OpenStack eagerly).
+# Task 2 scope: DevStack + omni bootstrap + provider binary + CONNECTED proof.
 on: workflow_dispatch
 jobs:
-  omni:
+  bringup:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: DevStack (Keystone, Glance, Nova, Neutron/OVN, Cinder, Placement)
+        run: scripts/devstack/install.sh --cloud-name devstack-e2e --workdir /tmp/devstack
 
       - name: Install omni + omnictl
         run: scripts/omni/install-omni.sh --workdir /tmp/omni
@@ -27,13 +33,45 @@ jobs:
           echo "::add-mask::$(cat /tmp/omni/provider-sa.key)"
           test -s /tmp/omni/provider-sa.key && echo "provider key extracted: $(wc -c < /tmp/omni/provider-sa.key) bytes"
 
-      - name: List infra providers (Admin SA; provider SA key is for the provider binary)
+      - name: Build provider
+        run: make build
+
+      - name: Provider check-cloud (OpenStack auth via our binary)
+        run: ./bin/provider check-cloud --cloud devstack-e2e
+
+      - name: Run provider (connects to omni + OpenStack)
+        run: |
+          nohup ./bin/provider \
+            --omni-api-endpoint https://localhost:8080 \
+            --omni-service-account-key "$(cat /tmp/omni/provider-sa.key)" \
+            --cloud devstack-e2e \
+            --insecure-skip-verify > /tmp/omni/provider.log 2>&1 &
+          for _ in $(seq 1 60); do
+            grep -q "starting infra provider" /tmp/omni/provider.log && break
+            sleep 2
+          done
+          grep -q "starting infra provider" /tmp/omni/provider.log
+          echo '--- provider.log ---'
+          cat /tmp/omni/provider.log
+
+      - name: CONNECTED proof (omni sees the provider)
         run: |
           export OMNI_ENDPOINT=https://localhost:8080
           export OMNI_SERVICE_ACCOUNT_KEY="$(sudo cat /tmp/omni/bootstrap-sa.key)"
-          /tmp/omni/bin/omnictl --insecure-skip-tls-verify infraprovider list | tee /tmp/omni/list.txt
-          grep -q openstack /tmp/omni/list.txt
+          for _ in $(seq 1 12); do
+            /tmp/omni/bin/omnictl --insecure-skip-tls-verify infraprovider list > /tmp/omni/list.txt 2>/dev/null || true
+            grep -qE 'OpenStack infrastructure provider +true' /tmp/omni/list.txt && break
+            sleep 10
+          done
+          cat /tmp/omni/list.txt
+          grep -qE 'OpenStack infrastructure provider +true' /tmp/omni/list.txt
 
-      - name: Omni log tail (diagnostics)
+      - name: Log tails (diagnostics)
         if: always()
-        run: tail -n 50 /tmp/omni/omni.log || true
+        run: |
+          echo '--- provider.log (last 50) ---'
+          tail -n 50 /tmp/omni/provider.log 2>/dev/null || true
+          echo '--- omni.log (last 50) ---'
+          tail -n 50 /tmp/omni/omni.log 2>/dev/null || true
+          echo '--- stack.log (last 30, passwords masked) ---'
+          tail -n 30 /tmp/devstack/stack.log 2>/dev/null || true
