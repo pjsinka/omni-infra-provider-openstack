@@ -47,9 +47,11 @@ if [[ ! -d "$WORKDIR/devstack/.git" ]]; then
   git clone --depth 1 -b "$BRANCH" https://opendev.org/openstack/devstack.git "$WORKDIR/devstack"
 fi
 
-# --- local.conf: static template + per-run generated values --------------------
+# --- local.conf: per-run generated values FIRST, then the static template ------
 # Random per-run admin password — nothing secret is committed; the cloud is
 # throwaway and only reachable from the runner itself.
+# localrc is evaluated in file order, so ADMIN_PASSWORD must be defined
+# BEFORE the $ADMIN_PASSWORD references in the static template below.
 ADMIN_PASSWORD="$(openssl rand -hex 16)"
 
 # Nested virtualization on GitHub-hosted runners is not guaranteed (mixed
@@ -68,11 +70,12 @@ if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
 fi
 
 {
-  cat "$SCRIPT_DIR/local.conf"
-  printf '\n# --- generated per-run by install.sh ---\n'
+  printf '# --- generated per-run by install.sh (ADMIN_PASSWORD first: localrc evaluates in file order) ---\n'
   printf 'ADMIN_PASSWORD=%s\n' "$ADMIN_PASSWORD"
-  printf 'LIBVIRT_TYPE=%s\n' "$LIBVIRT_TYPE"
+  printf 'LIBVIRT_TYPE=%s\n\n' "$LIBVIRT_TYPE"
+  cat "$SCRIPT_DIR/local.conf"
 } > "$WORKDIR/devstack/local.conf"
+chmod 600 "$WORKDIR/devstack/local.conf"
 
 # --- run stack.sh ----------------------------------------------------------------
 # stack.sh must run as a non-root user with sudo (the GitHub runner user is
