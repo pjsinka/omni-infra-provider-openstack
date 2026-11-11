@@ -193,8 +193,11 @@ rm -f "$STDERR_FILE"
 echo "app-cred create: exit=$OS_EXIT stdout-bytes=${#APP_CRED_JSON} stderr-bytes=${#OS_STDERR}"
 if [[ -n "$OS_STDERR" ]]; then printf 'app-cred stderr: %s\n' "$OS_STDERR"; fi
 echo "app-cred json keys: $(jq -r 'keys | join(",")' <<<"$APP_CRED_JSON" 2>&1 | head -1)"
-APP_CRED_ID="$(jq -r .id <<<"$APP_CRED_JSON" 2>/dev/null || true)"
-APP_CRED_SECRET="$(jq -r .secret <<<"$APP_CRED_JSON" 2>/dev/null || true)"
+# cliff's JSON formatter uses Title Case column names as keys ("ID",
+# "Secret" — see the json-keys diagnostic in Run 10); support both
+# spellings so the guard only trips on a genuinely unusable output.
+APP_CRED_ID="$(jq -r '.ID // .id' <<<"$APP_CRED_JSON" 2>/dev/null || true)"
+APP_CRED_SECRET="$(jq -r '.Secret // .secret' <<<"$APP_CRED_JSON" 2>/dev/null || true)"
 echo "app-cred id-bytes=${#APP_CRED_ID} secret-bytes=${#APP_CRED_SECRET}"
 if [[ -z "$APP_CRED_ID" || -z "$APP_CRED_SECRET" || "$APP_CRED_ID" == "null" || "$APP_CRED_SECRET" == "null" ]]; then
   echo "application credential creation failed" >&2
