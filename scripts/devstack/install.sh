@@ -47,11 +47,13 @@ if [[ ! -d "$WORKDIR/devstack/.git" ]]; then
   git clone --depth 1 -b "$BRANCH" https://opendev.org/openstack/devstack.git "$WORKDIR/devstack"
 fi
 
-# --- local.conf: per-run generated values FIRST, then the static template ------
+# --- local.conf: section header + per-run secrets + static template body ------
 # Random per-run admin password — nothing secret is committed; the cloud is
-# throwaway and only reachable from the runner itself.
-# localrc is evaluated in file order, so ADMIN_PASSWORD must be defined
-# BEFORE the $ADMIN_PASSWORD references in the static template below.
+# throwaway and only reachable from the runner itself. All service passwords
+# share the admin value. They are written as CONCRETE values, not
+# $ADMIN_PASSWORD indirection: the [[local|localrc]] section extractor drops
+# lines outside the section and localrc is sourced in file order — concrete
+# values have no ordering or section-boundary dependency at all.
 ADMIN_PASSWORD="$(openssl rand -hex 16)"
 
 # Nested virtualization on GitHub-hosted runners is not guaranteed (mixed
@@ -70,8 +72,12 @@ if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
 fi
 
 {
-  printf '# --- generated per-run by install.sh (ADMIN_PASSWORD first: localrc evaluates in file order) ---\n'
+  printf '[[local|localrc]]\n'
+  printf '# --- generated per-run by install.sh ---\n'
   printf 'ADMIN_PASSWORD=%s\n' "$ADMIN_PASSWORD"
+  printf 'DATABASE_PASSWORD=%s\n' "$ADMIN_PASSWORD"
+  printf 'RABBIT_PASSWORD=%s\n' "$ADMIN_PASSWORD"
+  printf 'SERVICE_PASSWORD=%s\n' "$ADMIN_PASSWORD"
   printf 'LIBVIRT_TYPE=%s\n\n' "$LIBVIRT_TYPE"
   cat "$SCRIPT_DIR/local.conf"
 } > "$WORKDIR/devstack/local.conf"
