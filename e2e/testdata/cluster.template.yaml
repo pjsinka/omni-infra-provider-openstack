@@ -1,0 +1,16 @@
+# Cluster resource for the Tier-2 e2e run. The MachineSet references this
+# cluster via its omni.sidero.dev/cluster label (Omni validates that the
+# labeled cluster exists - Run 16 failed without it), and the provider reads
+# the cluster's Talos version to resolve the boot image via the image factory.
+#
+# The version placeholders are rendered by the workflow from the versions the
+# Omni instance itself reports (omnictl get talosversions/kubernetesversions),
+# so the template never hardcodes a version pair that the instance may not
+# support.
+metadata:
+    namespace: default
+    type: Clusters.omni.sidero.dev
+    id: omni-e2e
+spec:
+    talosversion: __TALOS_VERSION__
+    kubernetesversion: __KUBERNETES_VERSION__

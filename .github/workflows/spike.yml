@@ -88,7 +88,7 @@ jobs:
           fi
           "$OPENSTACK_BIN" security group show e2e-sg -f yaml
 
-      - name: Apply machineclass + machineset (provisioning starts)
+      - name: Apply cluster + machineclass + machineset (provisioning starts)
         run: |
           set -euo pipefail
           export OMNI_ENDPOINT=https://localhost:8080
@@ -104,8 +104,28 @@ jobs:
             echo "BASE_VOLUMES=$BASE_VOLUMES"
             echo "BASE_PORTS=$BASE_PORTS"
           } >> "$GITHUB_ENV"
+          # Versions from the omni instance itself - never hardcode a pair
+          # the instance's image factory may not support.
+          /tmp/omni/bin/omnictl --insecure-skip-tls-verify get talosversions -o json > /tmp/talos-versions.json
+          /tmp/omni/bin/omnictl --insecure-skip-tls-verify get kubernetesversions -o json > /tmp/k8s-versions.json
+          echo '--- available talos versions ---'
+          jq -r '.[].metadata.id' /tmp/talos-versions.json
+          echo '--- available kubernetes versions ---'
+          jq -r '.[].metadata.id' /tmp/k8s-versions.json
+          TALOS_VERSION="$(jq -r '.[].metadata.id' /tmp/talos-versions.json | sort -V | tail -1)"
+          KUBERNETES_VERSION="$(jq -r '.[].metadata.id' /tmp/k8s-versions.json | sort -V | tail -1)"
+          echo "selected: talos=$TALOS_VERSION kubernetes=$KUBERNETES_VERSION"
+          [[ -n "$TALOS_VERSION" ]] || { echo "FATAL: no talos version reported by omni"; exit 1; }
+          [[ -n "$KUBERNETES_VERSION" ]] || { echo "FATAL: no kubernetes version reported by omni"; exit 1; }
+          sed -e "s/__TALOS_VERSION__/$TALOS_VERSION/" -e "s/__KUBERNETES_VERSION__/$KUBERNETES_VERSION/" \
+            e2e/testdata/cluster.template.yaml > /tmp/cluster.yaml
+          echo '--- rendered cluster.yaml ---'
+          cat /tmp/cluster.yaml
+          /tmp/omni/bin/omnictl --insecure-skip-tls-verify apply -f /tmp/cluster.yaml
           /tmp/omni/bin/omnictl --insecure-skip-tls-verify apply -f e2e/testdata/machineclass.yaml
           /tmp/omni/bin/omnictl --insecure-skip-tls-verify apply -f e2e/testdata/machineset.yaml
+          echo '--- cluster (as stored by omni) ---'
+          /tmp/omni/bin/omnictl --insecure-skip-tls-verify get clusters.omni.sidero.dev omni-e2e -o yaml
           echo '--- machineclass (as stored by omni) ---'
           /tmp/omni/bin/omnictl --insecure-skip-tls-verify get machineclasses.omni.sidero.dev omni-e2e-mc -o yaml
           echo '--- machineset (as stored by omni) ---'
