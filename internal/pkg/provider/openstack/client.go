@@ -52,8 +52,6 @@ func New(cloud string) (*Client, error) {
 		return nil, fmt.Errorf("authentication with cloud %q failed: %w", cloud, err)
 	}
 
-	_ = pc
-
 	c := &Client{Cloud: cloud, opts: opts}
 
 	targets := []struct {
@@ -63,7 +61,6 @@ func New(cloud string) (*Client, error) {
 		{"image", &c.image},
 		{"compute", &c.compute},
 		{"network", &c.network},
-		{"volume", &c.volume},
 	}
 
 	for _, t := range targets {
@@ -75,11 +72,72 @@ func New(cloud string) (*Client, error) {
 		*t.client = sc
 	}
 
+	// Volume is resolved separately: gophercloud's
+	// openstack.NewBlockStorageV3 hardcodes the legacy catalog type
+	// "volumev3", but the official OpenStack service type for Cinder is
+	// "block-storage" — DevStack 2026.2+ registers only the official type,
+	// which makes the stock lookup fail with "no suitable endpoint". See
+	// newBlockStorageClient.
+	cloudCfg, cloudErr := clientconfig.GetCloudFromYAML(opts)
+	if cloudErr != nil {
+		return nil, fmt.Errorf("reading cloud config for %q: %w", cloud, cloudErr)
+	}
+
+	volumeOpts := gophercloud.EndpointOpts{
+		Region:       cloudCfg.RegionName,
+		Availability: gophercloud.Availability(cloudCfg.EndpointType),
+	}
+
+	c.volume, err = newBlockStorageClient(pc, volumeOpts)
+	if err != nil {
+		return nil, fmt.Errorf("creating volume client: %w", err)
+	}
+
 	// BDM tags (2.42+) and BDM volume_type (2.67+) require a newer compute
 	// API microversion than gophercloud's conservative default.
 	c.compute.Microversion = "2.67"
 
 	return c, nil
+}
+
+// newBlockStorageClient resolves the Cinder (block storage) endpoint from the
+// service catalog. The official OpenStack service type is "block-storage"
+// (DevStack 2026.2+ registers only this type — devstack lib/cinder:
+// "block-storage is the official service type"), while older clouds register
+// the legacy types "volumev3"/"volume" that gophercloud's
+// openstack.NewBlockStorageV3 hardcodes. Try the official type first, then
+// the legacy ones, so the client works on both.
+func newBlockStorageClient(pc *gophercloud.ProviderClient, eo gophercloud.EndpointOpts) (*gophercloud.ServiceClient, error) {
+	var lastErr error
+
+	for _, serviceType := range []string{"block-storage", "volumev3", "volume"} {
+		sc, err := initServiceClient(pc, eo, serviceType)
+		if err == nil {
+			return sc, nil
+		}
+
+		lastErr = err
+	}
+
+	return nil, lastErr
+}
+
+// initServiceClient mirrors gophercloud's unexported initClientOpts: apply
+// the service-type defaults, resolve the URL via the provider's endpoint
+// locator and wrap it in a service client.
+func initServiceClient(pc *gophercloud.ProviderClient, eo gophercloud.EndpointOpts, serviceType string) (*gophercloud.ServiceClient, error) {
+	eo.ApplyDefaults(serviceType)
+
+	url, err := pc.EndpointLocator(eo)
+	if err != nil {
+		return nil, err
+	}
+
+	return &gophercloud.ServiceClient{
+		ProviderClient: pc,
+		Endpoint:       url,
+		Type:           serviceType,
+	}, nil
 }
 
 // CheckCloud performs a read-only connectivity probe and returns a report.
