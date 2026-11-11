@@ -1,0 +1,39 @@
+name: spike
+# Throwaway debug workflow for the Tier-2 e2e bring-up (deleted in Task 5).
+# Task 1 scope: omni bootstrap + infra provider registration, NO DevStack
+# and NO provider start (the provider initializes OpenStack eagerly).
+on: workflow_dispatch
+jobs:
+  omni:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install omni + omnictl
+        run: scripts/omni/install-omni.sh --workdir /tmp/omni
+
+      - name: Start omni (sudo, TUN) + bootstrap admin SA
+        run: scripts/omni/start-omni.sh --workdir /tmp/omni --key-out /tmp/omni/bootstrap-sa.key
+
+      - name: Register infra provider (bootstrap SA -> provider SA key)
+        run: |
+          echo "::add-mask::$(sudo cat /tmp/omni/bootstrap-sa.key)"
+          export OMNI_ENDPOINT=https://localhost:8080
+          export OMNI_SERVICE_ACCOUNT_KEY="$(sudo cat /tmp/omni/bootstrap-sa.key)"
+          /tmp/omni/bin/omnictl --insecure-skip-tls-verify infraprovider create openstack --ttl 24h > /tmp/omni/create.out 2>&1 \
+            || { cat /tmp/omni/create.out; exit 1; }
+          sed -n 's/^OMNI_SERVICE_ACCOUNT_KEY=//p' /tmp/omni/create.out > /tmp/omni/provider-sa.key
+          echo "::add-mask::$(cat /tmp/omni/provider-sa.key)"
+          test -s /tmp/omni/provider-sa.key && echo "provider key extracted: $(wc -c < /tmp/omni/provider-sa.key) bytes"
+
+      - name: List infra providers (provider SA proves InfraProvider role)
+        run: |
+          export OMNI_ENDPOINT=https://localhost:8080
+          export OMNI_SERVICE_ACCOUNT_KEY="$(cat /tmp/omni/provider-sa.key)"
+          /tmp/omni/bin/omnictl --insecure-skip-tls-verify infraprovider list | tee /tmp/omni/list.txt
+          grep -q openstack /tmp/omni/list.txt
+
+      - name: Omni log tail (diagnostics)
+        if: always()
+        run: tail -n 50 /tmp/omni/omni.log || true
