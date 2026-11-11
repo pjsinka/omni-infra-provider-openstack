@@ -83,6 +83,17 @@ fi
 } > "$WORKDIR/devstack/local.conf"
 chmod 600 "$WORKDIR/devstack/local.conf"
 
+# --- apt: refresh indexes + resolve runner-image package drift ------------------
+# The GitHub runner image ships packages from image-build time. When the
+# Ubuntu archive has moved on (security/point updates), stack.sh's
+# "apt-get install" transaction fails on exact-version dependencies
+# (observed: apache2-bin preinstalled one point-release behind the archive
+# apache2 that depends on it; postgresql-client-18 blocked likewise).
+# dist-upgrade brings every preinstalled package to current archive
+# versions first; safe on a throwaway runner, ~2 min.
+sudo apt-get update
+sudo DEBIAN_FRONTEND=noninteractive apt-get -y dist-upgrade
+
 # --- run stack.sh ----------------------------------------------------------------
 # stack.sh must run as a non-root user with sudo (the GitHub runner user is
 # exactly that). Full output goes to stack.log; only the tail is printed on
