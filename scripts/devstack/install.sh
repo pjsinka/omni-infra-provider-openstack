@@ -107,6 +107,20 @@ ls -l /etc/apt/sources.list.d/ || true
 echo "=== installed postgres packages ==="
 dpkg -l | grep -E '^ii +postgresql' || true
 sudo apt-mark unhold $(sudo apt-mark showhold) 2>/dev/null || true
+# MySQL: the runner image ships a pre-initialized MySQL with an
+# image-time root password unknown to us. DevStack's flow relies on a
+# FRESH install: it debconf-preseeds mysql-server/root_password with
+# $DATABASE_PASSWORD (lib/databases/mysql:206-208) and later logs in with
+# it — with the preinstalled server that login fails (Run 8: 'Access
+# denied for root@localhost'). Stop, purge and wipe the datadir;
+# stack.sh's install_package then does a fresh install with the preseed.
+echo "=== installed mysql packages ==="
+dpkg -l | grep -E '^ii +mysql' || true
+sudo systemctl stop mysql 2>/dev/null || true
+sudo apt-get -y purge 'mysql-server*' 2>/dev/null || true
+sudo apt-get -y purge 'mysql-client*' 2>/dev/null || true
+sudo apt-get -y purge 'mysql-common' 2>/dev/null || true
+sudo rm -rf /var/lib/mysql /etc/mysql
 # Firefox: its transitional deb installs a SNAP from the store, which is
 # unreachable on runners (Run 6 hung 30 min in the retry loop).
 sudo apt-get -y purge firefox
