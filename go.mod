@@ -4,6 +4,8 @@ go 1.26.7
 
 require (
 	github.com/cosi-project/runtime v1.16.3
+	github.com/gophercloud/gophercloud v1.14.1
+	github.com/gophercloud/utils v0.0.0-20231010081019-80377eca5d56
 	github.com/planetscale/vtprotobuf v0.6.1-0.20260702190614-8ae5a48058df
 	github.com/siderolabs/omni/client v1.10.0-beta.0.0.20260831181134-e460ae71eaae
 	github.com/spf13/cobra v1.10.2
@@ -48,8 +50,6 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-containerregistry v0.22.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gophercloud/gophercloud v1.14.1 // indirect
-	github.com/gophercloud/utils v0.0.0-20231010081019-80377eca5d56 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
