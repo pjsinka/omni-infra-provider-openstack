@@ -27,10 +27,10 @@ jobs:
           echo "::add-mask::$(cat /tmp/omni/provider-sa.key)"
           test -s /tmp/omni/provider-sa.key && echo "provider key extracted: $(wc -c < /tmp/omni/provider-sa.key) bytes"
 
-      - name: List infra providers (provider SA proves InfraProvider role)
+      - name: List infra providers (Admin SA; provider SA key is for the provider binary)
         run: |
           export OMNI_ENDPOINT=https://localhost:8080
-          export OMNI_SERVICE_ACCOUNT_KEY="$(cat /tmp/omni/provider-sa.key)"
+          export OMNI_SERVICE_ACCOUNT_KEY="$(sudo cat /tmp/omni/bootstrap-sa.key)"
           /tmp/omni/bin/omnictl --insecure-skip-tls-verify infraprovider list | tee /tmp/omni/list.txt
           grep -q openstack /tmp/omni/list.txt
 
