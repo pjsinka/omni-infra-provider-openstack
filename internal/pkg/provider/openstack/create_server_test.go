@@ -9,11 +9,52 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"strings"
+	"sync"
 	"testing"
 
 	th "github.com/gophercloud/gophercloud/testhelper"
 	"go.uber.org/zap"
 )
+
+// deleteTracker records port deletions across handler goroutines.
+type deleteTracker struct {
+	mu      sync.Mutex
+	deleted map[string]bool
+}
+
+func newDeleteTracker() *deleteTracker {
+	return &deleteTracker{deleted: map[string]bool{}}
+}
+
+func (d *deleteTracker) record(portID string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	d.deleted[portID] = true
+}
+
+func (d *deleteTracker) assertDeleted(t *testing.T, portID string) {
+	t.Helper()
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if !d.deleted[portID] {
+		t.Errorf("port %q was not deleted, deleted: %v", portID, d.deleted)
+	}
+}
+
+func (d *deleteTracker) assertNotDeleted(t *testing.T, portID string) {
+	t.Helper()
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.deleted[portID] {
+		t.Errorf("port %q must not have been deleted", portID)
+	}
+}
 
 func TestCreateServer_FullRequest(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -238,4 +279,223 @@ func TestCreateServer_MinimalRequest(t *testing.T) {
 	})
 	th.AssertNoErr(t, err)
 	th.AssertEquals(t, "srv-uuid", serverID)
+}
+
+func TestCreateServer_NICPortFails(t *testing.T) {
+	deleted := newDeleteTracker()
+
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/networks":
+			switch r.URL.Query().Get("name") {
+			case "tenant":
+				_ = json.NewEncoder(w).Encode(map[string]any{"networks": []map[string]any{{"id": "net-uuid", "name": "tenant"}}})
+			case "storage-net":
+				_ = json.NewEncoder(w).Encode(map[string]any{"networks": []map[string]any{{"id": "net2-uuid", "name": "storage-net"}}})
+			default:
+				t.Errorf("unexpected network lookup %q", r.URL.RawQuery)
+			}
+
+		case r.Method == http.MethodPost && r.URL.Path == "/ports":
+			body := serverBody(t, r)
+			port := body["port"].(map[string]any)
+
+			if port["network_id"] == "net2-uuid" {
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "boom"}})
+
+				return
+			}
+
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"port": map[string]any{"id": "port-main", "name": "machine-req"}})
+
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/ports/"):
+			deleted.record(strings.TrimPrefix(r.URL.Path, "/ports/"))
+			w.WriteHeader(http.StatusNoContent)
+
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL)
+		}
+	}))
+
+	_, err := client.CreateServer(context.Background(), zap.NewNop(), ServerRequest{
+		Name:           "machine-req",
+		ImageID:        "img-uuid",
+		Flavor:         "flav-uuid",
+		Network:        "tenant",
+		DiskSizeGB:     10,
+		AdditionalNICs: []AdditionalNIC{{Network: "storage-net"}},
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "creating additional nic port") {
+		t.Fatalf("expected nic port error, got %v", err)
+	}
+
+	deleted.assertDeleted(t, "port-main")
+}
+
+func TestCreateServer_ServerCreateFails(t *testing.T) {
+	deleted := newDeleteTracker()
+
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/networks":
+			switch r.URL.Query().Get("name") {
+			case "tenant":
+				_ = json.NewEncoder(w).Encode(map[string]any{"networks": []map[string]any{{"id": "net-uuid", "name": "tenant"}}})
+			case "storage-net":
+				_ = json.NewEncoder(w).Encode(map[string]any{"networks": []map[string]any{{"id": "net2-uuid", "name": "storage-net"}}})
+			default:
+				t.Errorf("unexpected network lookup %q", r.URL.RawQuery)
+			}
+
+		case r.Method == http.MethodPost && r.URL.Path == "/ports":
+			body := serverBody(t, r)
+			port := body["port"].(map[string]any)
+
+			var portID string
+			switch port["network_id"] {
+			case "net-uuid":
+				portID = "port-main"
+			case "net2-uuid":
+				portID = "port-nic-0"
+			default:
+				t.Errorf("unexpected port create for network %v", port["network_id"])
+
+				return
+			}
+
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"port": map[string]any{"id": portID, "name": "machine-req"}})
+
+		case r.Method == http.MethodGet && r.URL.Path == "/flavors/detail":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"flavors": []map[string]any{{"id": "flav-uuid", "name": "m1.large", "vcpus": 2, "ram": 4096, "disk": 20}},
+			})
+
+		case r.Method == http.MethodPost && r.URL.Path == "/servers":
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]any{"computeFault": map[string]any{"message": "boom", "code": 500}})
+
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/ports/"):
+			deleted.record(strings.TrimPrefix(r.URL.Path, "/ports/"))
+			w.WriteHeader(http.StatusNoContent)
+
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL)
+		}
+	}))
+
+	_, err := client.CreateServer(context.Background(), zap.NewNop(), ServerRequest{
+		Name:           "machine-req",
+		ImageID:        "img-uuid",
+		Flavor:         "m1.large",
+		Network:        "tenant",
+		DiskSizeGB:     10,
+		AdditionalNICs: []AdditionalNIC{{Network: "storage-net"}},
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "creating nova server") {
+		t.Fatalf("expected server create error, got %v", err)
+	}
+
+	deleted.assertDeleted(t, "port-main")
+	deleted.assertDeleted(t, "port-nic-0")
+}
+
+func TestCreateServer_ServerGroupTypo(t *testing.T) {
+	deleted := newDeleteTracker()
+
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/networks":
+			_ = json.NewEncoder(w).Encode(map[string]any{"networks": []map[string]any{{"id": "net-uuid", "name": "tenant"}}})
+
+		case r.Method == http.MethodPost && r.URL.Path == "/ports":
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"port": map[string]any{"id": "port-main", "name": "machine-req"}})
+
+		case r.Method == http.MethodGet && r.URL.Path == "/flavors/detail":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"flavors": []map[string]any{{"id": "flav-uuid", "name": "m1.large", "vcpus": 2, "ram": 4096, "disk": 20}},
+			})
+
+		case r.Method == http.MethodGet && r.URL.Path == "/os-server-groups":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"server_groups": []map[string]any{{"id": "123e4567-e89b-12d3-a456-426614174001", "name": "anti-affinity", "policies": []string{"anti-affinity"}}},
+			})
+
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/ports/"):
+			deleted.record(strings.TrimPrefix(r.URL.Path, "/ports/"))
+			w.WriteHeader(http.StatusNoContent)
+
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL)
+		}
+	}))
+
+	_, err := client.CreateServer(context.Background(), zap.NewNop(), ServerRequest{
+		Name:        "machine-req",
+		ImageID:     "img-uuid",
+		Flavor:      "m1.large",
+		Network:     "tenant",
+		DiskSizeGB:  10,
+		ServerGroup: "typo-name",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected not-found error, got %v", err)
+	}
+
+	deleted.assertDeleted(t, "port-main")
+}
+
+func TestCreateServer_AmbiguousNetwork(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/networks":
+			_ = json.NewEncoder(w).Encode(map[string]any{"networks": []map[string]any{
+				{"id": "net-1", "name": "tenant"},
+				{"id": "net-2", "name": "tenant"},
+			}})
+
+		default:
+			// The network resolution fails before any port is created —
+			// anything else (POST /ports, flavors, servers) is a bug.
+			t.Errorf("unexpected request %s %s", r.Method, r.URL)
+		}
+	}))
+
+	_, err := client.CreateServer(context.Background(), zap.NewNop(), ServerRequest{
+		Name:       "machine-req",
+		ImageID:    "img-uuid",
+		Flavor:     "flav-uuid",
+		Network:    "tenant",
+		DiskSizeGB: 10,
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("expected ambiguity error, got %v", err)
+	}
 }
