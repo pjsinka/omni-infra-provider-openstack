@@ -22,6 +22,7 @@ import (
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
 	"github.com/gophercloud/gophercloud/openstack/imageservice/v2/imagedata"
 	"github.com/gophercloud/gophercloud/openstack/imageservice/v2/images"
+	secgroups "github.com/gophercloud/gophercloud/openstack/networking/v2/extensions/security/groups"
 	"github.com/gophercloud/gophercloud/openstack/networking/v2/networks"
 	"github.com/gophercloud/gophercloud/openstack/networking/v2/ports"
 	"github.com/gophercloud/utils/openstack/clientconfig"
@@ -357,13 +358,21 @@ func (c *Client) CreateServer(ctx context.Context, logger *zap.Logger, req Serve
 		return "", err
 	}
 
+	var securityGroupIDs []string
+	if len(req.SecurityGroups) > 0 {
+		securityGroupIDs, err = c.resolveSecurityGroups(req.SecurityGroups)
+		if err != nil {
+			return "", err
+		}
+	}
+
 	portOpts := ports.CreateOpts{
 		NetworkID: networkID,
 		Name:      req.Name,
 	}
 
-	if len(req.SecurityGroups) > 0 {
-		portOpts.SecurityGroups = &req.SecurityGroups
+	if len(securityGroupIDs) > 0 {
+		portOpts.SecurityGroups = &securityGroupIDs
 	}
 
 	port, err := ports.Create(c.network, portOpts).Extract()
@@ -395,7 +404,14 @@ func (c *Client) CreateServer(ctx context.Context, logger *zap.Logger, req Serve
 		}
 
 		if len(nic.SecurityGroups) > 0 {
-			nicPortOpts.SecurityGroups = &nic.SecurityGroups
+			nicSecurityGroupIDs, sgErr := c.resolveSecurityGroups(nic.SecurityGroups)
+			if sgErr != nil {
+				deleteAllPorts()
+
+				return "", sgErr
+			}
+
+			nicPortOpts.SecurityGroups = &nicSecurityGroupIDs
 		}
 
 		nicPort, nicErr := ports.Create(c.network, nicPortOpts).Extract()
@@ -772,4 +788,49 @@ func (c *Client) resolveFlavor(nameOrID string) (string, error) {
 
 	// No flavor with that name: assume the value is already an ID.
 	return nameOrID, nil
+}
+
+// resolveSecurityGroups resolves security group names to their IDs; IDs are
+// passed through unchanged. Neutron's port API only accepts security group
+// UUIDs, while machine classes reference groups by name or ID.
+func (c *Client) resolveSecurityGroups(names []string) ([]string, error) {
+	pager := secgroups.List(c.network, secgroups.ListOpts{})
+
+	pages, err := pager.AllPages()
+	if err != nil {
+		return nil, fmt.Errorf("listing security groups: %w", err)
+	}
+
+	allGroups, err := secgroups.ExtractGroups(pages)
+	if err != nil {
+		return nil, fmt.Errorf("extracting security groups: %w", err)
+	}
+
+	ids := make(map[string]bool, len(allGroups))
+	byName := make(map[string][]string, len(allGroups))
+	for _, g := range allGroups {
+		ids[g.ID] = true
+		byName[g.Name] = append(byName[g.Name], g.ID)
+	}
+
+	resolved := make([]string, 0, len(names))
+	for _, name := range names {
+		if ids[name] {
+			resolved = append(resolved, name)
+
+			continue
+		}
+
+		matches := byName[name]
+		switch {
+		case len(matches) == 1:
+			resolved = append(resolved, matches[0])
+		case len(matches) > 1:
+			return nil, fmt.Errorf("security group %q is ambiguous (%d matches)", name, len(matches))
+		default:
+			return nil, fmt.Errorf("security group %q not found", name)
+		}
+	}
+
+	return resolved, nil
 }

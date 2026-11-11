@@ -117,3 +117,64 @@ func TestUUIDLike(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveSecurityGroups(t *testing.T) {
+	t.Run("resolves names to ids and passes ids through", func(t *testing.T) {
+		client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/security-groups" {
+				t.Errorf("unexpected path %q", r.URL.Path)
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"security_groups": []map[string]any{
+					{"id": "sec-uuid", "name": "e2e-sg"},
+					{"id": "123e4567-e89b-12d3-a456-426614174001", "name": "other"},
+				},
+			})
+		}))
+
+		ids, err := client.resolveSecurityGroups([]string{"e2e-sg", "123e4567-e89b-12d3-a456-426614174001"})
+		th.AssertNoErr(t, err)
+		th.AssertDeepEquals(t, []string{"sec-uuid", "123e4567-e89b-12d3-a456-426614174001"}, ids)
+	})
+
+	t.Run("errors when name and id are unknown", func(t *testing.T) {
+		client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"security_groups": []map[string]any{{"id": "sec-uuid", "name": "e2e-sg"}},
+			})
+		}))
+
+		_, err := client.resolveSecurityGroups([]string{"missing-sg"})
+		if err == nil {
+			t.Fatal("expected not-found error, got nil")
+		}
+
+		if !strings.Contains(err.Error(), "not found") {
+			t.Fatalf("expected not-found error, got %v", err)
+		}
+	})
+
+	t.Run("errors when name is ambiguous", func(t *testing.T) {
+		client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"security_groups": []map[string]any{
+					{"id": "sec-1", "name": "e2e-sg"},
+					{"id": "sec-2", "name": "e2e-sg"},
+				},
+			})
+		}))
+
+		_, err := client.resolveSecurityGroups([]string{"e2e-sg"})
+		if err == nil {
+			t.Fatal("expected ambiguity error, got nil")
+		}
+
+		if !strings.Contains(err.Error(), "ambiguous") {
+			t.Fatalf("expected ambiguous error, got %v", err)
+		}
+	})
+}

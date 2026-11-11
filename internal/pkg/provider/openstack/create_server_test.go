@@ -92,6 +92,14 @@ func TestCreateServer_FullRequest(t *testing.T) {
 				t.Errorf("unexpected port create for network %v", port["network_id"])
 			}
 
+		case r.Method == http.MethodGet && r.URL.Path == "/security-groups":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"security_groups": []map[string]any{
+					{"id": "sec-uuid", "name": "e2e-sg"},
+					{"id": "sec-storage", "name": "storage-sg"},
+				},
+			})
+
 		case r.Method == http.MethodGet && r.URL.Path == "/flavors/detail":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"flavors": []map[string]any{{"id": "flav-uuid", "name": "m1.large", "vcpus": 2, "ram": 4096, "disk": 20}},
@@ -185,7 +193,7 @@ func TestCreateServer_FullRequest(t *testing.T) {
 		ImageID:          "img-uuid",
 		Flavor:           "m1.large",
 		Network:          "tenant",
-		SecurityGroups:   []string{"sec-uuid"},
+		SecurityGroups:   []string{"e2e-sg"},
 		DiskSizeGB:       20,
 		VolumeType:       "ssd",
 		AvailabilityZone: "az-1",
@@ -194,7 +202,7 @@ func TestCreateServer_FullRequest(t *testing.T) {
 		ConfigDrive:      true,
 		Metadata:         map[string]string{"managed-by": "omni"},
 		AdditionalDisks:  []AdditionalDisk{{SizeGB: 5, VolumeType: "hdd"}},
-		AdditionalNICs:   []AdditionalNIC{{Network: "storage-net", SecurityGroups: []string{"sec-storage"}}},
+		AdditionalNICs:   []AdditionalNIC{{Network: "storage-net", SecurityGroups: []string{"storage-sg"}}},
 	})
 	th.AssertNoErr(t, err)
 	th.AssertEquals(t, "srv-uuid", serverID)
