@@ -152,9 +152,50 @@ export OS_IDENTITY_API_VERSION=3
 export OS_INTERFACE=public
 export OS_REGION_NAME=RegionOne
 
-APP_CRED_JSON="$(openstack application credential create "$CLOUD_NAME" -f json)"
-APP_CRED_ID="$(jq -r .id <<<"$APP_CRED_JSON")"
-APP_CRED_SECRET="$(jq -r .secret <<<"$APP_CRED_JSON")"
+# Prefer devstack's own CLI (proven against this exact cloud — stack.sh
+# just drove the whole installation with it); fall back to PATH.
+OPENSTACK_BIN=""
+for cand in /opt/stack/data/venv/bin/openstack /opt/stack/.venv/bin/openstack /opt/stack/venv/bin/openstack; do
+  if [[ -x "$cand" ]]; then OPENSTACK_BIN="$cand"; break; fi
+done
+[[ -z "$OPENSTACK_BIN" ]] && OPENSTACK_BIN="$(command -v openstack || true)"
+echo "openstack binary: ${OPENSTACK_BIN:-MISSING}"
+if [[ -n "$OPENSTACK_BIN" ]]; then
+  "$OPENSTACK_BIN" --version 2>&1 | head -1 || true
+fi
+
+# NOTE: the app credential secret appears ONLY in the create output.
+# Diagnostics print exit codes, byte counts and JSON KEYS only — never
+# values, never the secret itself.
+STDERR_FILE="$(mktemp)"
+
+# Auth smoke test with the resolved binary: separates "auth/cloud broken"
+# (token issue fails) from "create broken" (token OK, create fails) in the
+# CI log.
+set +e
+"$OPENSTACK_BIN" token issue -f value -c id > /dev/null 2>"$STDERR_FILE"
+TOKEN_EXIT=$?
+TOKEN_STDERR="$(cat "$STDERR_FILE")"
+set -e
+echo "token smoke: exit=$TOKEN_EXIT stderr-bytes=${#TOKEN_STDERR}"
+if [[ "$TOKEN_EXIT" -ne 0 ]]; then
+  if [[ -n "$TOKEN_STDERR" ]]; then printf 'token stderr: %s\n' "$TOKEN_STDERR"; fi
+  echo "auth smoke test failed — keystone/auth problem, not app-cred" >&2
+  exit 1
+fi
+
+set +e
+APP_CRED_JSON="$("$OPENSTACK_BIN" application credential create "$CLOUD_NAME" -f json 2>"$STDERR_FILE")"
+OS_EXIT=$?
+set -e
+OS_STDERR="$(cat "$STDERR_FILE")"
+rm -f "$STDERR_FILE"
+echo "app-cred create: exit=$OS_EXIT stdout-bytes=${#APP_CRED_JSON} stderr-bytes=${#OS_STDERR}"
+if [[ -n "$OS_STDERR" ]]; then printf 'app-cred stderr: %s\n' "$OS_STDERR"; fi
+echo "app-cred json keys: $(jq -r 'keys | join(",")' <<<"$APP_CRED_JSON" 2>&1 | head -1)"
+APP_CRED_ID="$(jq -r .id <<<"$APP_CRED_JSON" 2>/dev/null || true)"
+APP_CRED_SECRET="$(jq -r .secret <<<"$APP_CRED_JSON" 2>/dev/null || true)"
+echo "app-cred id-bytes=${#APP_CRED_ID} secret-bytes=${#APP_CRED_SECRET}"
 if [[ -z "$APP_CRED_ID" || -z "$APP_CRED_SECRET" || "$APP_CRED_ID" == "null" || "$APP_CRED_SECRET" == "null" ]]; then
   echo "application credential creation failed" >&2
   exit 1
@@ -186,8 +227,14 @@ unset OS_AUTH_URL OS_USERNAME OS_PASSWORD OS_PROJECT_NAME OS_USER_DOMAIN_NAME \
 export OS_CLOUD="$CLOUD_NAME"
 export OS_CLIENT_CONFIG_FILE="$CLOUDS_FILE"
 
-openstack token issue -f value -c id > /dev/null
-openstack flavor list -f value -c Name | grep -qx m1.small
+if ! "$OPENSTACK_BIN" token issue -f value -c id > /dev/null 2>/dev/null; then
+  echo "verify failed: token issue via app credential (cloud '$CLOUD_NAME')" >&2
+  exit 1
+fi
+if ! "$OPENSTACK_BIN" flavor list -f value -c Name 2>/dev/null | grep -qx m1.small; then
+  echo "verify failed: m1.small missing from flavor list (cloud '$CLOUD_NAME')" >&2
+  exit 1
+fi
 echo "devstack ready: cloud '$CLOUD_NAME' authenticates, m1.small present, clouds file: $CLOUDS_FILE"
 
 # --- export cloud env for subsequent workflow steps -------------------------------
