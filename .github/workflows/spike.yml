@@ -80,10 +80,11 @@ jobs:
           if "$OPENSTACK_BIN" security group show e2e-sg >/dev/null 2>&1; then
             echo "e2e-sg exists already"
           else
-            "$OPENSTACK_BIN" security group create e2e-sg --description "omni e2e machines: all egress allowed"
-            # Rules only on create, keeps the step idempotent; the machine
-            # needs egress to reach Omni (SideroLink) once it boots.
-            "$OPENSTACK_BIN" security group rule create e2e-sg --egress --protocol any --remote-ip 0.0.0.0/0
+            # Neutron 2026.2 creates allow-all egress rules (IPv4+IPv6)
+            # together with the group - Run 15 proved it: our extra egress
+            # rule 409-conflicted with the auto-created IPv4 one. The machine
+            # reaches Omni (SideroLink) via those defaults; no extra rules.
+            "$OPENSTACK_BIN" security group create e2e-sg --description "omni e2e machines (egress via default rules)"
           fi
           "$OPENSTACK_BIN" security group show e2e-sg -f yaml
 
