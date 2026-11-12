@@ -227,7 +227,11 @@ jobs:
           private_id="$("$OPENSTACK_BIN" network show private -f value -c id)"
           [[ "$port_net" == "$private_id" ]] || { echo "FAIL: port network $port_net != private ($private_id)"; exit 1; }
           sg_id="$("$OPENSTACK_BIN" security group show e2e-sg -f value -c id)"
-          jq -e --arg sg "$sg_id" '.security_groups | index($sg) != null' /tmp/port.json >/dev/null \
+          # OpenStackClient port show exposes the SG UUIDs under the key
+          # security_group_ids, not security_groups (Run 21: the port carried
+          # e2e-sg - visible in security_group_ids - while the check read
+          # .security_groups and found nothing).
+          jq -e --arg sg "$sg_id" '.security_group_ids | index($sg) != null' /tmp/port.json >/dev/null \
             || { echo "FAIL: port security_groups do not contain e2e-sg ($sg_id)"; exit 1; }
           echo "ALL VERIFICATIONS PASSED"
 
