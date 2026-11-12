@@ -106,17 +106,18 @@ jobs:
           } >> "$GITHUB_ENV"
           # Versions from the omni instance itself - never hardcode a pair
           # the instance's image factory may not support.
-          /tmp/omni/bin/omnictl --insecure-skip-tls-verify get talosversions -o json > /tmp/talos-versions.json
-          /tmp/omni/bin/omnictl --insecure-skip-tls-verify get kubernetesversions -o json > /tmp/k8s-versions.json
-          echo '--- available talos versions ---'
-          jq -r '.[].metadata.id' /tmp/talos-versions.json
-          echo '--- available kubernetes versions ---'
-          jq -r '.[].metadata.id' /tmp/k8s-versions.json
-          TALOS_VERSION="$(jq -r '.[].metadata.id' /tmp/talos-versions.json | sort -V | tail -1)"
-          KUBERNETES_VERSION="$(jq -r '.[].metadata.id' /tmp/k8s-versions.json | sort -V | tail -1)"
+          # Parse the COSI YAML (metadata.id, 4-space indent), not -o json:
+          # Run 17 proved omnictl's json output has no metadata.id field
+          # (jq produced 260 nulls) while the YAML layout is documented.
+          /tmp/omni/bin/omnictl --insecure-skip-tls-verify get talosversions -o yaml > /tmp/talos-versions.yaml
+          /tmp/omni/bin/omnictl --insecure-skip-tls-verify get kubernetesversions -o yaml > /tmp/k8s-versions.yaml
+          echo "talos versions: $(grep -c '^    id: ' /tmp/talos-versions.yaml) total; latest 5: $(sed -n 's/^    id: //p' /tmp/talos-versions.yaml | sort -V | tail -5 | tr '\n' ' ')"
+          echo "kubernetes versions: $(grep -c '^    id: ' /tmp/k8s-versions.yaml) total; latest 5: $(sed -n 's/^    id: //p' /tmp/k8s-versions.yaml | sort -V | tail -5 | tr '\n' ' ')"
+          TALOS_VERSION="$(sed -n 's/^    id: //p' /tmp/talos-versions.yaml | sort -V | tail -1)"
+          KUBERNETES_VERSION="$(sed -n 's/^    id: //p' /tmp/k8s-versions.yaml | sort -V | tail -1)"
           echo "selected: talos=$TALOS_VERSION kubernetes=$KUBERNETES_VERSION"
-          [[ -n "$TALOS_VERSION" ]] || { echo "FATAL: no talos version reported by omni"; exit 1; }
-          [[ -n "$KUBERNETES_VERSION" ]] || { echo "FATAL: no kubernetes version reported by omni"; exit 1; }
+          [[ -n "$TALOS_VERSION" ]] || { echo "FATAL: no talos version reported by omni"; echo '--- raw talosversions yaml (first 40 lines) ---'; head -40 /tmp/talos-versions.yaml; exit 1; }
+          [[ -n "$KUBERNETES_VERSION" ]] || { echo "FATAL: no kubernetes version reported by omni"; echo '--- raw kubernetesversions yaml (first 40 lines) ---'; head -40 /tmp/k8s-versions.yaml; exit 1; }
           sed -e "s/__TALOS_VERSION__/$TALOS_VERSION/" -e "s/__KUBERNETES_VERSION__/$KUBERNETES_VERSION/" \
             e2e/testdata/cluster.template.yaml > /tmp/cluster.yaml
           echo '--- rendered cluster.yaml ---'
