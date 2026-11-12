@@ -4,9 +4,11 @@ OpenStack infrastructure provider for [Omni](https://omni.siderolabs.com):
 provisions Talos machines as Nova servers, declaratively, driven by Omni
 machine classes.
 
-Status: **v0.1.0 released** — a Talos cluster born from OpenStack via
+Status: **v0.2.0 released** — a Talos cluster born from OpenStack via
 self-hosted Omni, surviving a full host reboot (stateless provider, state
-lives in Omni).
+lives in Omni). v0.2.0 adds a Cinder endpoint fallback (DevStack's
+`block-storage` service type), security-group name→ID resolution, a nightly
+DevStack E2E pipeline in CI, and transient-error retries in deprovisioning.
 
 ## Highlights
 
@@ -115,7 +117,7 @@ a fresh, disposable DevStack cloud.
 ## OCI Image
 
 Prebuilt multi-arch image (amd64/arm64):
-`ghcr.io/pjsinka/omni-infra-provider-openstack:v0.1.0`
+`ghcr.io/pjsinka/omni-infra-provider-openstack:v0.2.0` (or `:latest`)
 
     docker build -t omni-infra-provider-openstack:test .
 
