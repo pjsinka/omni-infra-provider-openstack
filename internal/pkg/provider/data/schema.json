@@ -35,6 +35,11 @@
       "description": "Talos image architecture.",
       "default": "amd64"
     },
+    "firmware": {
+      "type": "string",
+      "enum": ["uefi", "bios"],
+      "description": "Machine firmware boot mode. Creates a separate Glance image per mode (firmware is a Glance image property in OpenStack). Empty leaves the Nova default."
+    },
     "server_group": {
       "type": "string",
       "description": "Optional Nova server group (name or ID) whose policy spreads the machines, e.g. created with: openstack server group create --policy soft-anti-affinity <name>. Use one group per machine class (control planes separate from workers) so Nova places machines on different compute hosts."

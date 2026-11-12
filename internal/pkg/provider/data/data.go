@@ -7,6 +7,7 @@ package data
 
 import (
 	_ "embed"
+	"fmt"
 )
 
 //go:embed schema.json
@@ -21,6 +22,7 @@ type Data struct {
 	VolumeType       string           `yaml:"volume_type,omitempty"`
 	AvailabilityZone string           `yaml:"availability_zone,omitempty"`
 	Architecture     string           `yaml:"architecture"`
+	Firmware         string           `yaml:"firmware,omitempty"`
 	ServerGroup      string           `yaml:"server_group,omitempty"`
 	Metadata         map[string]string `yaml:"metadata,omitempty"`
 	AdditionalDisks  []AdditionalDisk `yaml:"additional_disks,omitempty"`
@@ -37,4 +39,15 @@ type AdditionalNIC struct {
 type AdditionalDisk struct {
 	SizeGB     int    `yaml:"size_gb"`
 	VolumeType string `yaml:"volume_type,omitempty"`
+}
+
+// ValidateFirmware checks the firmware machine class field: it must be
+// empty (Nova default) or one of uefi/bios.
+func ValidateFirmware(firmware string) error {
+	switch firmware {
+	case "", "uefi", "bios":
+		return nil
+	default:
+		return fmt.Errorf("invalid firmware %q: must be \"uefi\", \"bios\" or empty", firmware)
+	}
 }
