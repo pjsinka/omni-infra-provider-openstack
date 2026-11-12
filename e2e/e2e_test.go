@@ -27,6 +27,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -244,6 +246,23 @@ func TestE2EProvisionDeprovision(t *testing.T) {
 		t.Errorf("boot volume status = %s, want in-use", bootVol.Status)
 	}
 
+	// Boot volume origin: Omni imports the schematic into Glance and Nova
+	// boots from a volume created from that image. The volume carries the
+	// image metadata (qcow2 disk format, image_name = 64-hex schematic id) —
+	// proving the Glance import chain instead of a leftover image.
+	volDetail, err := volumes.Get(volClient, bootVol.ID).Extract()
+	if err != nil {
+		t.Fatalf("getting boot volume %s: %v", bootVol.ID, err)
+	}
+
+	if got := volDetail.VolumeImageMetadata["disk_format"]; got != "qcow2" {
+		t.Errorf("boot volume image disk_format = %q, want qcow2", got)
+	}
+
+	if imageName := volDetail.VolumeImageMetadata["image_name"]; !schematicIDRe.MatchString(imageName) {
+		t.Errorf("boot volume image_name = %q, want 64-hex schematic id", imageName)
+	}
+
 	// Port: exactly one, in network "private", carrying the test security
 	// group (the provider attaches it by name — Run 21 proved the port's
 	// security_groups list contains the e2e-sg UUID).
@@ -253,17 +272,17 @@ func TestE2EProvisionDeprovision(t *testing.T) {
 	}
 
 	var machinePort ports.Port
+	portCount := 0
 
 	for _, p := range portList {
 		if p.DeviceID == srv.ID {
+			portCount++
 			machinePort = p
-
-			break
 		}
 	}
 
-	if machinePort.ID == "" {
-		t.Fatalf("no port on server %s", srv.ID)
+	if portCount != 1 {
+		t.Fatalf("server %s has %d ports, want exactly 1", srv.ID, portCount)
 	}
 
 	netList, err := networks.List(networkClient, networks.ListOpts{Name: "private"}).AllPages()
@@ -284,7 +303,7 @@ func TestE2EProvisionDeprovision(t *testing.T) {
 		t.Errorf("port network = %s, want private (%s)", machinePort.NetworkID, netNames[0].ID)
 	}
 
-	if !containsString(machinePort.SecurityGroups, sgID) {
+	if !slices.Contains(machinePort.SecurityGroups, sgID) {
 		t.Errorf("port security groups = %v, want to contain %s (%s)", machinePort.SecurityGroups, sgID, sgName)
 	}
 
@@ -698,12 +717,7 @@ func purgePorts(t *testing.T, networkClient *gophercloud.ServiceClient) {
 	}
 }
 
-func containsString(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-
-	return false
-}
+// schematicIDRe matches the 64-hex-character ids Omni assigns to schematics:
+// the boot volume's volume_image_metadata image_name is the schematic id the
+// Glance image was imported from.
+var schematicIDRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
