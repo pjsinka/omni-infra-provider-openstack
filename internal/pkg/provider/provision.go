@@ -56,6 +56,12 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 				return err
 			}
 
+			if err := data.ValidateFirmware(pdata.Firmware); err != nil {
+				// Plain error: invalid machine class data must not trigger
+				// Omni retry loops.
+				return err
+			}
+
 			// Resolve the installation media through Omni (authenticated image
 			// factories supported). OpenStack consumes the disk image directly via
 			// Glance web-import, so no connection params travel inside the image.
@@ -76,12 +82,6 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 			}
 
 			pctx.State.TypedSpec().Value.Schematic = media.SchematicID
-
-			if err := data.ValidateFirmware(pdata.Firmware); err != nil {
-				// Plain error: invalid machine class data must not trigger
-				// Omni retry loops.
-				return err
-			}
 
 			storageKey := media.StorageKey
 			var imageProperties map[string]string
