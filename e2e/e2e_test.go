@@ -96,6 +96,12 @@ func TestE2EProvisionDeprovision(t *testing.T) {
 		t.Fatalf("creating compute client: %v", err)
 	}
 
+	// The flavor original_name field requires compute microversion 2.47+;
+	// gophercloud's default is older and returns the flavor as a bare link
+	// without original_name (first e2e run failed with flavor = <nil>). The
+	// provider sets the same version (client.go).
+	computeClient.Microversion = "2.67"
+
 	networkClient, err := clientconfig.NewServiceClient("network", cloudOpts)
 	if err != nil {
 		t.Fatalf("creating network client: %v", err)
