@@ -39,6 +39,7 @@ config:
   availability_zone: auto        # zone name, "auto" (rotate live from Nova), or empty
   server_group: control-plane-spread  # optional Nova server group (spread!)
   architecture: amd64            # Talos image architecture
+  firmware: uefi                 # optional: "uefi" or "bios" (empty = Nova default)
   metadata:                      # optional Nova server metadata
     managed-by: omni-infra-provider-openstack
   additional_disks:              # extra data volumes (e.g. Longhorn)
