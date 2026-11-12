@@ -130,7 +130,7 @@ jobs:
           echo '--- machineclass (as stored by omni) ---'
           /tmp/omni/bin/omnictl --insecure-skip-tls-verify get machineclasses.omni.sidero.dev omni-e2e-mc -o yaml
           echo '--- machineset (as stored by omni) ---'
-          /tmp/omni/bin/omnictl --insecure-skip-tls-verify get machineSets.omni.sidero.dev omni-e2e-ms -o yaml
+          /tmp/omni/bin/omnictl --insecure-skip-tls-verify get machineSets.omni.sidero.dev omni-e2e-control-planes -o yaml
 
       - name: Poll machinerequest + nova server until ACTIVE (max 20 min)
         run: |
@@ -216,7 +216,7 @@ jobs:
           set -euo pipefail
           export OMNI_ENDPOINT=https://localhost:8080
           export OMNI_SERVICE_ACCOUNT_KEY="$(sudo cat /tmp/omni/bootstrap-sa.key)"
-          /tmp/omni/bin/omnictl --insecure-skip-tls-verify delete machineSets.omni.sidero.dev omni-e2e-ms
+          /tmp/omni/bin/omnictl --insecure-skip-tls-verify delete machineSets.omni.sidero.dev omni-e2e-control-planes
           deadline=$((SECONDS + 600))
           while (( SECONDS < deadline )); do
             s="$("$OPENSTACK_BIN" server list -f value -c ID | grep -c . || true)"
