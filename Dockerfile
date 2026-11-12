@@ -8,7 +8,10 @@ RUN go mod download
 COPY api api
 COPY cmd cmd
 COPY internal internal
-ARG TAG="v0.1.0-alpha.0"
+# Stamped into the binary via ldflags (internal/version.Tag); the CI
+# workflow passes TAG=${{ github.ref_name }}. "unknown" makes a missing
+# stamping visible instead of silently reporting a stale version.
+ARG TAG="unknown"
 RUN CGO_ENABLED=0 go build \
     -ldflags "-X internal/version.Tag=${TAG}" \
     -o /provider ./cmd/omni-infra-provider-openstack

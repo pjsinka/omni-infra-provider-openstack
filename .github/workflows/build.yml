@@ -39,5 +39,10 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/omni-infra-provider-openstack:${{ github.ref_name }}
             ghcr.io/${{ github.repository_owner }}/omni-infra-provider-openstack:latest
+          # The binary reports its version to Omni (internal/version.Tag via
+          # ldflags). Without this build-arg the Dockerfile default would
+          # stamp every release with a stale version.
+          build-args: |
+            TAG=${{ github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
