@@ -190,23 +190,26 @@ OS_EXIT=$?
 set -e
 OS_STDERR="$(cat "$STDERR_FILE")"
 rm -f "$STDERR_FILE"
-echo "app-cred create: exit=$OS_EXIT stdout-bytes=${#APP_CRED_JSON} stderr-bytes=${#OS_STDERR}"
-if [[ -n "$OS_STDERR" ]]; then printf 'app-cred stderr: %s\n' "$OS_STDERR"; fi
-echo "app-cred json keys: $(jq -r 'keys | join(",")' <<<"$APP_CRED_JSON" 2>&1 | head -1)"
 # cliff's JSON formatter uses Title Case column names as keys ("ID",
 # "Secret" — see the json-keys diagnostic in Run 10); support both
 # spellings so the guard only trips on a genuinely unusable output.
 APP_CRED_ID="$(jq -r '.ID // .id' <<<"$APP_CRED_JSON" 2>/dev/null || true)"
 APP_CRED_SECRET="$(jq -r '.Secret // .secret' <<<"$APP_CRED_JSON" 2>/dev/null || true)"
+
+# Mask the app credential secret BEFORE any diagnostic touches the create
+# output: jq parse errors can quote fragments of their input, so the keys
+# diagnostic below must not run unmasked.
+if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+  echo "::add-mask::${APP_CRED_SECRET}"
+fi
+
+echo "app-cred create: exit=$OS_EXIT stdout-bytes=${#APP_CRED_JSON} stderr-bytes=${#OS_STDERR}"
+if [[ -n "$OS_STDERR" ]]; then printf 'app-cred stderr: %s\n' "$OS_STDERR"; fi
+echo "app-cred json keys: $(jq -r 'keys | join(",")' <<<"$APP_CRED_JSON" 2>&1 | head -1)"
 echo "app-cred id-bytes=${#APP_CRED_ID} secret-bytes=${#APP_CRED_SECRET}"
 if [[ -z "$APP_CRED_ID" || -z "$APP_CRED_SECRET" || "$APP_CRED_ID" == "null" || "$APP_CRED_SECRET" == "null" ]]; then
   echo "application credential creation failed" >&2
   exit 1
-fi
-
-# Mask the app credential secret before anything else can print it.
-if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-  echo "::add-mask::${APP_CRED_SECRET}"
 fi
 
 CLOUDS_FILE="$HOME/${CLOUD_NAME}-clouds.yaml"
@@ -288,6 +291,33 @@ echo "verify flavor: exit=$FLAVOR_EXIT stderr-bytes=${#FLAVOR_STDERR} m1.small-p
 if [[ -n "$FLAVOR_STDERR" ]]; then printf 'flavor stderr: %s\n' "$FLAVOR_STDERR"; fi
 if [[ "$FLAVOR_EXIT" -ne 0 ]] || ! grep -qx m1.small <<<"$FLAVOR_LIST"; then
   echo "verify failed: m1.small missing or flavor list failed (cloud '$CLOUD_NAME')" >&2
+  exit 1
+fi
+
+# Service catalog check: the registered service TYPES are listed in the log
+# — this makes catalog issues visible early (the Cinder "block-storage"
+# endpoint-type mismatch in the first spike run would have shown up here),
+# and the expected types are verified to exist.
+set +e
+SERVICE_LIST="$("$OPENSTACK_BIN" service list -f value -c Type 2>"$STDERR_FILE")"
+SERVICE_EXIT=$?
+SERVICE_STDERR="$(cat "$STDERR_FILE")"
+rm -f "$STDERR_FILE"
+set -e
+echo "service catalog: exit=$SERVICE_EXIT types=$(tr '\n' ',' < <(sort -u <<<"$SERVICE_LIST") | sed 's/,$//')"
+if [[ -n "$SERVICE_STDERR" ]]; then printf 'service stderr: %s\n' "$SERVICE_STDERR"; fi
+if [[ "$SERVICE_EXIT" -ne 0 ]]; then
+  echo "verify failed: service list failed (cloud '$CLOUD_NAME')" >&2
+  exit 1
+fi
+for expected in identity compute image network placement; do
+  if ! grep -qx "$expected" <<<"$SERVICE_LIST"; then
+    echo "verify failed: expected service type '$expected' missing from catalog" >&2
+    exit 1
+  fi
+done
+if ! grep -qE '^(block-storage|volumev3|volume)$' <<<"$SERVICE_LIST"; then
+  echo "verify failed: no volume service type (block-storage/volumev3/volume) in catalog" >&2
   exit 1
 fi
 echo "devstack ready: cloud '$CLOUD_NAME' authenticates, m1.small present, clouds file: $CLOUDS_FILE"

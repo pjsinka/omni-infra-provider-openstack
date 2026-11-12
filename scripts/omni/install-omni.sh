@@ -42,9 +42,11 @@ mkdir -p "${WORKDIR}/bin" "${WORKDIR}/omnictl"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "${STAGE}"' EXIT
 
-curl -fsSL -o "${STAGE}/sha256sum.txt" "${BASE_URL}/sha256sum.txt"
+# --retry covers transient network hiccups; --retry-delay spaces the
+# attempts. -f still fails fast on HTTP errors.
+curl --retry 3 --retry-delay 2 -fsSL -o "${STAGE}/sha256sum.txt" "${BASE_URL}/sha256sum.txt"
 for asset in omni-linux-amd64 omnictl-linux-amd64; do
-  curl -fsSL -o "${STAGE}/${asset}" "${BASE_URL}/${asset}"
+  curl --retry 3 --retry-delay 2 -fsSL -o "${STAGE}/${asset}" "${BASE_URL}/${asset}"
 done
 
 # Verify both entries; fail if the manifest does not contain exactly the two

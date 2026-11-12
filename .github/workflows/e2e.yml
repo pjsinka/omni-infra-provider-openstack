@@ -68,12 +68,16 @@ jobs:
           export OMNI_ENDPOINT=https://localhost:8080
           export OMNI_SERVICE_ACCOUNT_KEY="$(sudo cat /tmp/omni/bootstrap-sa.key)"
           for _ in $(seq 1 12); do
-            /tmp/omni/bin/omnictl --insecure-skip-tls-verify infraprovider list > /tmp/omni/list.txt 2>/dev/null || true
+            /tmp/omni/bin/omnictl --insecure-skip-tls-verify infraprovider list > /tmp/omni/list.txt 2>/tmp/omni/list.err || true
             grep -qE 'OpenStack infrastructure provider +true' /tmp/omni/list.txt && break
             sleep 10
           done
           cat /tmp/omni/list.txt
-          grep -qE 'OpenStack infrastructure provider +true' /tmp/omni/list.txt
+          if ! grep -qE 'OpenStack infrastructure provider +true' /tmp/omni/list.txt; then
+            echo '--- omnictl stderr ---'
+            cat /tmp/omni/list.err || true
+            exit 1
+          fi
 
       - name: E2E tests (provision + deprovision via make test-e2e)
         run: |
