@@ -13,7 +13,7 @@ COPY internal internal
 # stamping visible instead of silently reporting a stale version.
 ARG TAG="unknown"
 RUN CGO_ENABLED=0 go build \
-    -ldflags "-X internal/version.Tag=${TAG}" \
+    -ldflags "-X github.com/pjsinka/omni-infra-provider-openstack/internal/version.Tag=${TAG}" \
     -o /provider ./cmd/omni-infra-provider-openstack
 
 # runtime stage: alpine keeps a debug shell around while brewing;
