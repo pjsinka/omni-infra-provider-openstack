@@ -104,6 +104,14 @@ clientconfig search paths apply otherwise) and `OMNICTL_BIN` (defaults to
 `omnictl` on PATH). The test sources live in `e2e/`, the pipeline in
 `.github/workflows/e2e.yml`.
 
+**Warning:** run the local e2e test against a throwaway project only.
+The cleanup purges leftovers aggressively: it deletes every volume that
+appeared in the project after the test started (not just this test's
+own) and every server and port whose name starts with `omni-e2e` —
+including resources from any parallel e2e run. On a shared project this
+can destroy unrelated volumes. The CI pipeline is unaffected: it runs on
+a fresh, disposable DevStack cloud.
+
 ## OCI Image
 
 Prebuilt multi-arch image (amd64/arm64):
