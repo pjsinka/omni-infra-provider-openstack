@@ -83,15 +83,7 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 
 			pctx.State.TypedSpec().Value.Schematic = media.SchematicID
 
-			storageKey := media.StorageKey
-			var imageProperties map[string]string
-
-			if pdata.Firmware != "" {
-				// Firmware is a Glance image property: BIOS and UEFI machines
-				// need separate images, hence the storage key suffix.
-				storageKey += "-" + pdata.Firmware
-				imageProperties = map[string]string{"hw_firmware_type": pdata.Firmware}
-			}
+			storageKey, imageProperties := firmwareImage(media.StorageKey, pdata.Firmware)
 
 			imageID, err := p.client.EnsureImage(ctx, logger, storageKey, media.URL, media.Headers, imageProperties)
 			if err != nil {
