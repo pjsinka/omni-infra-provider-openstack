@@ -16,3 +16,7 @@ vet:
 .PHONY: test
 test:
 	go test -race ./...
+
+.PHONY: test-e2e
+test-e2e:
+	go test -tags=e2e -timeout 35m ./e2e/...

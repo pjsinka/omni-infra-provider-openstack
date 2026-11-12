@@ -78,7 +78,7 @@ func New(cloud string) (*Client, error) {
 	// "volumev3", but the official OpenStack service type for Cinder is
 	// "block-storage" — DevStack 2026.2+ registers only the official type,
 	// which makes the stock lookup fail with "no suitable endpoint". See
-	// newBlockStorageClient.
+	// NewBlockStorageClient.
 	cloudCfg, cloudErr := clientconfig.GetCloudFromYAML(opts)
 	if cloudErr != nil {
 		return nil, fmt.Errorf("reading cloud config for %q: %w", cloud, cloudErr)
@@ -89,7 +89,7 @@ func New(cloud string) (*Client, error) {
 		Availability: gophercloud.Availability(cloudCfg.EndpointType),
 	}
 
-	c.volume, err = newBlockStorageClient(pc, volumeOpts)
+	c.volume, err = NewBlockStorageClient(pc, volumeOpts)
 	if err != nil {
 		return nil, fmt.Errorf("creating volume client: %w", err)
 	}
@@ -101,14 +101,15 @@ func New(cloud string) (*Client, error) {
 	return c, nil
 }
 
-// newBlockStorageClient resolves the Cinder (block storage) endpoint from the
+// NewBlockStorageClient resolves the Cinder (block storage) endpoint from the
 // service catalog. The official OpenStack service type is "block-storage"
 // (DevStack 2026.2+ registers only this type — devstack lib/cinder:
 // "block-storage is the official service type"), while older clouds register
 // the legacy types "volumev3"/"volume" that gophercloud's
 // openstack.NewBlockStorageV3 hardcodes. Try the official type first, then
-// the legacy ones, so the client works on both.
-func newBlockStorageClient(pc *gophercloud.ProviderClient, eo gophercloud.EndpointOpts) (*gophercloud.ServiceClient, error) {
+// the legacy ones, so the client works on both. Exported for the e2e test,
+// which needs the same resolution against the same clouds.yaml.
+func NewBlockStorageClient(pc *gophercloud.ProviderClient, eo gophercloud.EndpointOpts) (*gophercloud.ServiceClient, error) {
 	var lastErr error
 
 	for _, serviceType := range []string{"block-storage", "volumev3", "volume"} {

@@ -3,6 +3,7 @@ module github.com/pjsinka/omni-infra-provider-openstack
 go 1.26.7
 
 require (
+	github.com/blang/semver/v4 v4.0.0
 	github.com/cosi-project/runtime v1.16.3
 	github.com/gophercloud/gophercloud v1.14.1
 	github.com/gophercloud/utils v0.0.0-20231010081019-80377eca5d56
@@ -19,7 +20,6 @@ require (
 	github.com/ProtonMail/gopenpgp/v3 v3.4.1 // indirect
 	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
-	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cloudflare/circl v1.6.4 // indirect
 	github.com/containerd/go-cni v1.1.13 // indirect
