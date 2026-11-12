@@ -76,6 +76,34 @@ Run the provider as a container next to your Omni instance (Podman/Quadlet):
 Credentials come from `~/.config/openstack/clouds.yaml` (application
 credential); the provider reads them itself — never commit them.
 
+## Testing
+
+Two layers, both wired into CI:
+
+- `make test` — hermetic Tier-1 API contract tests (gophercloud fake
+  transport; no OpenStack needed); runs on every PR via `ci.yml`.
+- `make test-e2e` — Tier-2 end-to-end: a GitHub runner brings up DevStack
+  (stable/2026.2) + self-hosted Omni (v1.13.3) + this provider, then
+  `TestE2EProvisionDeprovision` provisions a machine through Omni
+  (cluster → machine class → machine set), asserts the Nova server,
+  boot volume, port and security group, deprovisions everything and waits
+  for the baseline. Runs nightly (03:00 UTC) and on demand via
+  `.github/workflows/e2e.yml`; no secrets in the repo — the runner
+  generates everything it needs locally.
+
+Local run against an existing Omni instance with the provider registered
+and an OpenStack cloud (the test skips without these):
+
+    OMNI_ENDPOINT=https://omni.example:8080 \
+    OMNI_SERVICE_ACCOUNT_KEY=<key> \
+    OS_CLOUD=mycloud \
+    make test-e2e
+
+Optional: `OS_CLIENT_CONFIG_FILE` (clouds.yaml path; gophercloud's
+clientconfig search paths apply otherwise) and `OMNICTL_BIN` (defaults to
+`omnictl` on PATH). The test sources live in `e2e/`, the pipeline in
+`.github/workflows/e2e.yml`.
+
 ## OCI Image
 
 Prebuilt multi-arch image (amd64/arm64):
@@ -100,7 +128,8 @@ runtime with CA certificates. On the target host build natively
       system extensions flow via cluster templates (Omni-native)
 - [ ] Floating IPs, access-rule hardening, pb.go regeneration (protoc)
 - [x] Multi-arch builds (GHCR amd64/arm64), publication (v0.1.0)
-- [ ] E2E suite
+- [x] E2E suite (DevStack + Omni nightly pipeline, provision→assert→
+      deprovision; two consecutive green runs)
 
 ## License
 
