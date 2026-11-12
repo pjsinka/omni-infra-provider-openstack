@@ -1,13 +1,15 @@
 # MachineSet allocating one machine from the omni-e2e-mc machine class.
-# Field names (updatestrategy, machineallocation, allocationtype) follow the
-# official Omni example from "Write an Infrastructure Providers"
-# (docs.sidero.dev, omni/infrastructure-and-extensions/writing-infrastructure-providers):
+# Field names (updatestrategy, machineallocation, allocationtype) and BOTH
+# labels follow the official Omni example from "Write an Infrastructure
+# Providers" (docs.sidero.dev,
+# omni/infrastructure-and-extensions/writing-infrastructure-providers):
+# - omni.sidero.dev/cluster: Omni validates the referenced cluster exists
+#   (Run 16 failed without the label).
+# - omni.sidero.dev/role-controlplane with an empty value: Omni rejects
+#   machine sets carrying neither role-controlplane nor role-worker
+#   (Run 18 failed without it). The machine becomes the cluster's single
+#   control plane node.
 # updatestrategy 1 = Rolling, allocationtype 0 = static allocation.
-#
-# The omni.sidero.dev/cluster label is REQUIRED: Omni validates that the
-# referenced cluster exists (Run 16 failed with "label omni.sidero.dev/cluster
-# does not exist" / "the cluster \"\" does not exist" without it). The cluster
-# itself is created from cluster.template.yaml by the same workflow step.
 #
 # Applying this resource makes Omni create a MachineRequest which our
 # provider provisions as a Nova server (flavor m1.small, boot volume 10G,
@@ -18,6 +20,7 @@ metadata:
     id: omni-e2e-ms
     labels:
         omni.sidero.dev/cluster: omni-e2e
+        omni.sidero.dev/role-controlplane:
 spec:
     updatestrategy: 1
     machineallocation:
