@@ -77,7 +77,7 @@ func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 
 			pctx.State.TypedSpec().Value.Schematic = media.SchematicID
 
-			imageID, err := p.client.EnsureImage(ctx, logger, media.StorageKey, media.URL, media.Headers)
+			imageID, err := p.client.EnsureImage(ctx, logger, media.StorageKey, media.URL, media.Headers, nil)
 			if err != nil {
 				return provision.NewRetryErrorf(time.Second*10, "ensuring image: %w", err)
 			}

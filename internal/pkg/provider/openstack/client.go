@@ -249,8 +249,9 @@ func (c *Client) ImageIDByName(name string) (string, error) {
 // EnsureImage makes sure a Glance image with the given storage key exists,
 // streaming the image data from the image factory URL straight into Glance
 // (regular upload — works everywhere, no web-download import required).
-// It returns the image ID.
-func (c *Client) EnsureImage(ctx context.Context, logger *zap.Logger, storageKey, url string, headers http.Header) (string, error) {
+// Non-nil properties are merged into the image create request as top-level
+// Glance v2 image properties. It returns the image ID.
+func (c *Client) EnsureImage(ctx context.Context, logger *zap.Logger, storageKey, url string, headers http.Header, properties map[string]string) (string, error) {
 	listPager := images.List(c.image, images.ListOpts{Name: storageKey, Limit: 1})
 
 	listPages, err := listPager.AllPages()
@@ -275,11 +276,18 @@ func (c *Client) EnsureImage(ctx context.Context, logger *zap.Logger, storageKey
 		return img.ID, nil
 	}
 
-	created, err := images.Create(c.image, images.CreateOpts{
+	createOpts := images.CreateOpts{
 		Name:            storageKey,
 		DiskFormat:      "qcow2",
 		ContainerFormat: "bare",
-	}).Extract()
+	}
+
+	if len(properties) > 0 {
+		// Glance v2: custom image properties are top-level JSON keys.
+		createOpts.Properties = properties
+	}
+
+	created, err := images.Create(c.image, createOpts).Extract()
 	if err != nil {
 		return "", fmt.Errorf("creating image: %w", err)
 	}

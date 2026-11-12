@@ -35,7 +35,7 @@ func TestEnsureImage_AlreadyActive(t *testing.T) {
 	}))
 
 	// The factory URL is never fetched — an invalid URL would fail the test.
-	id, err := client.EnsureImage(context.Background(), zap.NewNop(), "key", "http://factory.invalid/image", nil)
+	id, err := client.EnsureImage(context.Background(), zap.NewNop(), "key", "http://factory.invalid/image", nil, nil)
 	th.AssertNoErr(t, err)
 	th.AssertEquals(t, "img-uuid", id)
 }
@@ -57,7 +57,7 @@ func TestEnsureImage_StillSaving(t *testing.T) {
 		}
 	}))
 
-	_, err := client.EnsureImage(context.Background(), zap.NewNop(), "key", "http://factory.invalid/image", nil)
+	_, err := client.EnsureImage(context.Background(), zap.NewNop(), "key", "http://factory.invalid/image", nil, nil)
 	if err == nil {
 		t.Fatal("expected waiting error, got nil")
 	}
@@ -107,7 +107,7 @@ func TestEnsureImage_Uploads(t *testing.T) {
 		}
 	}))
 
-	id, err := client.EnsureImage(context.Background(), zap.NewNop(), "key", factory.URL+"/image", http.Header{"X-Factory-Token": []string{"token123"}})
+	id, err := client.EnsureImage(context.Background(), zap.NewNop(), "key", factory.URL+"/image", http.Header{"X-Factory-Token": []string{"token123"}}, nil)
 	th.AssertNoErr(t, err)
 	th.AssertEquals(t, "img-uuid", id)
 }
@@ -140,7 +140,7 @@ func TestEnsureImage_FactoryNon200(t *testing.T) {
 		}
 	}))
 
-	_, err := client.EnsureImage(context.Background(), zap.NewNop(), "key", factory.URL+"/image", nil)
+	_, err := client.EnsureImage(context.Background(), zap.NewNop(), "key", factory.URL+"/image", nil, nil)
 	if err == nil {
 		t.Fatal("expected factory error, got nil")
 	}
@@ -185,7 +185,7 @@ func TestEnsureImage_UploadFails(t *testing.T) {
 		}
 	}))
 
-	_, err := client.EnsureImage(context.Background(), zap.NewNop(), "key", factory.URL+"/image", nil)
+	_, err := client.EnsureImage(context.Background(), zap.NewNop(), "key", factory.URL+"/image", nil, nil)
 	if err == nil {
 		t.Fatal("expected upload error, got nil")
 	}
@@ -195,4 +195,81 @@ func TestEnsureImage_UploadFails(t *testing.T) {
 	}
 
 	deleted.assertDeleted(t, "img-uuid")
+}
+
+func TestEnsureImage_SetsFirmwareProperty(t *testing.T) {
+	for _, firmware := range []string{"uefi", "bios"} {
+		t.Run(firmware, func(t *testing.T) {
+			factory := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/octet-stream")
+				_, _ = w.Write([]byte("fake-qcow2"))
+			}))
+			t.Cleanup(factory.Close)
+
+			client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/images":
+					_ = json.NewEncoder(w).Encode(map[string]any{"images": []map[string]any{}})
+
+				case r.Method == http.MethodPost && r.URL.Path == "/images":
+					body := serverBody(t, r)
+					th.AssertEquals(t, "key-"+firmware, body["name"])
+					th.AssertEquals(t, firmware, body["hw_firmware_type"])
+
+					w.WriteHeader(http.StatusCreated)
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": "img-uuid", "name": "key", "status": "queued"})
+
+				case r.Method == http.MethodPut && r.URL.Path == "/images/img-uuid/file":
+					w.WriteHeader(http.StatusNoContent)
+
+				default:
+					t.Errorf("unexpected request %s %s", r.Method, r.URL)
+				}
+			}))
+
+			id, err := client.EnsureImage(context.Background(), zap.NewNop(),
+				"key-"+firmware, factory.URL+"/image", nil,
+				map[string]string{"hw_firmware_type": firmware})
+			th.AssertNoErr(t, err)
+			th.AssertEquals(t, "img-uuid", id)
+		})
+	}
+}
+
+func TestEnsureImage_NoPropertiesOmittedFromBody(t *testing.T) {
+	factory := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		_, _ = w.Write([]byte("fake-qcow2"))
+	}))
+	t.Cleanup(factory.Close)
+
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/images":
+			_ = json.NewEncoder(w).Encode(map[string]any{"images": []map[string]any{}})
+
+		case r.Method == http.MethodPost && r.URL.Path == "/images":
+			body := serverBody(t, r)
+			if _, ok := body["hw_firmware_type"]; ok {
+				t.Errorf("hw_firmware_type must be omitted for nil properties, got %v", body["hw_firmware_type"])
+			}
+
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "img-uuid", "name": "key", "status": "queued"})
+
+		case r.Method == http.MethodPut && r.URL.Path == "/images/img-uuid/file":
+			w.WriteHeader(http.StatusNoContent)
+
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL)
+		}
+	}))
+
+	id, err := client.EnsureImage(context.Background(), zap.NewNop(), "key", factory.URL+"/image", nil, nil)
+	th.AssertNoErr(t, err)
+	th.AssertEquals(t, "img-uuid", id)
 }
