@@ -179,35 +179,55 @@ jobs:
           "$OPENSTACK_BIN" server show "$server_id" -f json > /tmp/server.json
           "$OPENSTACK_BIN" server show "$server_id" -f yaml
           flavor="$(jq -r '.flavor.original_name' /tmp/server.json)"
-          managed="$(jq -r '.metadata["managed-by"] // empty' /tmp/server.json)"
+          # OpenStackClient renames nova server metadata to "properties" in
+          # server show output (Run 20: the value lives at
+          # .properties["managed-by"], not .metadata[...]).
+          managed="$(jq -r '.properties["managed-by"] // empty' /tmp/server.json)"
           status="$(jq -r '.status' /tmp/server.json)"
           [[ "$flavor" == "m1.small" ]] || { echo "FAIL: flavor=$flavor (want m1.small)"; exit 1; }
           [[ "$managed" == "omni-infra-provider-openstack" ]] || { echo "FAIL: managed-by=$managed"; exit 1; }
           [[ "$status" == "ACTIVE" ]] || { echo "FAIL: status=$status (want ACTIVE)"; exit 1; }
 
-          echo '--- volume list ---'
-          "$OPENSTACK_BIN" volume list -f json > /tmp/volumes.json
-          jq -r '.[] | "\(.id) size=\(.size) status=\(.status) name=\(.name)"' /tmp/volumes.json
-          vol_count="$(jq 'length' /tmp/volumes.json)"
+          # Volume count via the id column (same -f value -c ID pattern the
+          # poll step proved on server list); details from volume show -
+          # show commands expose raw attribute keys (size, status,
+          # attachments), no guessing at list-command JSON key casing.
+          echo '--- volume count ---'
+          "$OPENSTACK_BIN" volume list -f value -c ID > /tmp/vol-ids.txt
+          cat /tmp/vol-ids.txt
+          vol_count="$(grep -c . /tmp/vol-ids.txt || true)"
           vol_expect=$((BASE_VOLUMES + 1))
           [[ "$vol_count" == "$vol_expect" ]] || { echo "FAIL: expected $vol_expect volumes (baseline+1), got $vol_count"; exit 1; }
-          # The new volume is the one attached to our server; find it explicitly.
-          vol_id="$(jq -r --arg s "$server_id" '.[] | select((.attachments // []) | map(.server_id == $s) | any) | .ID' /tmp/volumes.json)"
-          [[ -n "$vol_id" ]] || { echo "FAIL: no volume attached to server $server_id"; exit 1; }
-          vol_size="$(jq -r --arg v "$vol_id" '.[] | select(.ID == $v) | .size' /tmp/volumes.json)"
-          vol_status="$(jq -r --arg v "$vol_id" '.[] | select(.ID == $v) | .status' /tmp/volumes.json)"
+          # Boot volume id from the server (server show JSON:
+          # volumes_attached[].id - proven in Run 20's output).
+          vol_id="$(jq -r '.volumes_attached[0].id' /tmp/server.json)"
+          [[ -n "$vol_id" ]] || { echo "FATAL: no volume attached to server $server_id (volumes_attached empty)"; exit 1; }
+          echo "--- volume show ($vol_id) ---"
+          "$OPENSTACK_BIN" volume show "$vol_id" -f json > /tmp/volume.json
+          "$OPENSTACK_BIN" volume show "$vol_id" -f yaml
+          vol_size="$(jq -r '.size' /tmp/volume.json)"
+          vol_status="$(jq -r '.status' /tmp/volume.json)"
           [[ "$vol_size" == "10" ]] || { echo "FAIL: volume size=$vol_size (want 10)"; exit 1; }
           [[ "$vol_status" == "in-use" ]] || { echo "FAIL: volume status=$vol_status (want in-use)"; exit 1; }
+          jq -e --arg s "$server_id" '.attachments | map(.server_id == $s) | any' /tmp/volume.json >/dev/null \
+            || { echo "FAIL: volume $vol_id not attached to server $server_id"; exit 1; }
 
-          echo '--- port list ---'
-          "$OPENSTACK_BIN" port list --server "$server_id" -f json > /tmp/ports.json
-          port_count="$(jq 'length' /tmp/ports.json)"
+          # Port count via the id column; details from port show (raw
+          # attribute keys: network_id, security_groups).
+          echo '--- port count ---'
+          "$OPENSTACK_BIN" port list --server "$server_id" -f value -c ID > /tmp/port-ids.txt
+          cat /tmp/port-ids.txt
+          port_count="$(grep -c . /tmp/port-ids.txt || true)"
           [[ "$port_count" == "1" ]] || { echo "FAIL: expected exactly 1 port on the server, got $port_count"; exit 1; }
-          port_net="$(jq -r '.[0].network_id' /tmp/ports.json)"
+          port_id="$(head -1 /tmp/port-ids.txt)"
+          echo "--- port show ($port_id) ---"
+          "$OPENSTACK_BIN" port show "$port_id" -f json > /tmp/port.json
+          "$OPENSTACK_BIN" port show "$port_id" -f yaml
+          port_net="$(jq -r '.network_id' /tmp/port.json)"
           private_id="$("$OPENSTACK_BIN" network show private -f value -c id)"
           [[ "$port_net" == "$private_id" ]] || { echo "FAIL: port network $port_net != private ($private_id)"; exit 1; }
           sg_id="$("$OPENSTACK_BIN" security group show e2e-sg -f value -c id)"
-          jq -e --arg sg "$sg_id" '.[0].security_groups | index($sg) != null' /tmp/ports.json >/dev/null \
+          jq -e --arg sg "$sg_id" '.security_groups | index($sg) != null' /tmp/port.json >/dev/null \
             || { echo "FAIL: port security_groups do not contain e2e-sg ($sg_id)"; exit 1; }
           echo "ALL VERIFICATIONS PASSED"
 
