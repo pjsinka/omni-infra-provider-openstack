@@ -110,7 +110,7 @@ func New(cloud string) (*Client, error) {
 // the legacy ones, so the client works on both. Exported for the e2e test,
 // which needs the same resolution against the same clouds.yaml.
 func NewBlockStorageClient(pc *gophercloud.ProviderClient, eo gophercloud.EndpointOpts) (*gophercloud.ServiceClient, error) {
-	var lastErr error
+	var errs []error
 
 	for _, serviceType := range []string{"block-storage", "volumev3", "volume"} {
 		sc, err := initServiceClient(pc, eo, serviceType)
@@ -118,10 +118,13 @@ func NewBlockStorageClient(pc *gophercloud.ProviderClient, eo gophercloud.Endpoi
 			return sc, nil
 		}
 
-		lastErr = err
+		errs = append(errs, fmt.Errorf("%s: %w", serviceType, err))
 	}
 
-	return nil, lastErr
+	// Join all attempts: when every candidate type fails, the combined
+	// error shows which service types were tried and why each one failed
+	// (endpoint missing, catalog mismatch, ...).
+	return nil, errors.Join(errs...)
 }
 
 // initServiceClient mirrors gophercloud's unexported initClientOpts: apply
