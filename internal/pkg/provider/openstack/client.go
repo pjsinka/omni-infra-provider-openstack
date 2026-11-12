@@ -650,15 +650,24 @@ func (c *Client) DeleteServer(ctx context.Context, logger *zap.Logger, serverID,
 	err := servers.Delete(c.compute, serverID).ExtractErr()
 
 	var err404 gophercloud.ErrDefault404
+	var err500 gophercloud.ErrDefault500
 
-	if err != nil && !errors.As(err, &err404) {
-		return fmt.Errorf("deleting server: %w", err)
-	}
-
-	if err == nil {
+	switch {
+	case err == nil:
 		logger.Info("requested server deletion", zap.String("server", serverID))
 
 		return ErrCleanupPending
+	case errors.As(err, &err404):
+		// already gone — scan for leftover ports below
+	case errors.As(err, &err500):
+		// Nova 500s are mostly transient; failing hard could leave a paid
+		// zombie server behind — retry instead.
+		logger.Warn("server deletion returned 500 — retrying later",
+			zap.String("server", serverID), zap.Error(err))
+
+		return ErrCleanupPending
+	default:
+		return fmt.Errorf("deleting server: %w", err)
 	}
 
 	portPager := ports.List(c.network, ports.ListOpts{Name: portName})
@@ -676,12 +685,20 @@ func (c *Client) DeleteServer(ctx context.Context, logger *zap.Logger, serverID,
 	for _, pt := range leftPorts {
 		if delErr := ports.Delete(c.network, pt.ID).ExtractErr(); delErr != nil {
 			var port404 gophercloud.ErrDefault404
+			var port409 gophercloud.ErrDefault409
 
-			if errors.As(delErr, &port404) {
+			switch {
+			case errors.As(delErr, &port404):
 				continue
+			case errors.As(delErr, &port409):
+				// Nova detaches ports asynchronously — the port is
+				// still in use. An expected transient state: the port
+				// stays counted as leftover and the caller retries,
+				// same handling as the NIC ports below.
+				continue
+			default:
+				return fmt.Errorf("deleting leftover port: %w", delErr)
 			}
-
-			return fmt.Errorf("deleting leftover port: %w", delErr)
 		}
 
 		logger.Info("deleted leftover port", zap.String("port", pt.ID))
@@ -729,6 +746,11 @@ func (c *Client) DeleteServer(ctx context.Context, logger *zap.Logger, serverID,
 	// delete_on_termination=true: Nova removes them together with the
 	// server — no separate volume cleanup needed.
 
+	// Confirm-by-absence: a port deleted this round still counts as a
+	// leftover, so cleanup is only reported done when the NEXT round
+	// finds nothing. Costs one retry interval, buys the certainty that
+	// nothing is left behind (a delete accepted now can still be listed
+	// briefly by the API backend).
 	if len(leftPorts) == 0 && leftNics == 0 {
 		logger.Info("machine fully deprovisioned",
 			zap.String("server", serverID),

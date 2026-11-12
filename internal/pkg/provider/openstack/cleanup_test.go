@@ -113,6 +113,9 @@ func TestDeleteServer_PortDelete409(t *testing.T) {
 				{"id": "port-main", "name": "machine-req"},
 			}})
 
+		case r.Method == http.MethodGet && r.URL.Path == "/ports":
+			_ = json.NewEncoder(w).Encode(map[string]any{"ports": []map[string]any{}})
+
 		case r.Method == http.MethodDelete && r.URL.Path == "/ports/port-main":
 			// Port still attached to the server (Nova detaches
 			// asynchronously) — Neutron refuses the delete.
@@ -124,17 +127,12 @@ func TestDeleteServer_PortDelete409(t *testing.T) {
 		}
 	}))
 
+	// A 409 while Nova is still detaching is an expected transient state:
+	// the leftover port stays and the caller retries — same handling as
+	// the NIC ports, no hard failure.
 	err := client.DeleteServer(context.Background(), zap.NewNop(), "srv-uuid", "machine-req")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-
-	if errors.Is(err, ErrCleanupPending) {
-		t.Fatalf("expected hard error, got ErrCleanupPending: %v", err)
-	}
-
-	if !strings.Contains(err.Error(), "deleting leftover port") {
-		t.Fatalf("expected leftover port error, got %v", err)
+	if !errors.Is(err, ErrCleanupPending) {
+		t.Fatalf("expected ErrCleanupPending, got %v", err)
 	}
 }
 
@@ -180,7 +178,7 @@ func TestDeleteServer_NICPrefixCleanup(t *testing.T) {
 	deleted.assertNotDeleted(t, "nic-2")
 }
 
-func TestDeleteServer_ServerDeleteError(t *testing.T) {
+func TestDeleteServer_ServerDelete500(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -194,6 +192,31 @@ func TestDeleteServer_ServerDeleteError(t *testing.T) {
 		}
 	}))
 
+	// Nova 500s are mostly transient. Failing hard here could leave a paid
+	// zombie server behind — the caller retries instead. The first round
+	// returns early after the delete request.
+	err := client.DeleteServer(context.Background(), zap.NewNop(), "srv-uuid", "machine-req")
+	if !errors.Is(err, ErrCleanupPending) {
+		t.Fatalf("expected ErrCleanupPending, got %v", err)
+	}
+}
+
+func TestDeleteServer_ServerDeleteForbidden(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == "/servers/srv-uuid":
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]any{"forbidden": map[string]any{"message": "not allowed", "code": 403}})
+
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL)
+		}
+	}))
+
+	// Non-transient failures (auth, policy) stay hard errors: retrying
+	// would hide a real problem from the user.
 	err := client.DeleteServer(context.Background(), zap.NewNop(), "srv-uuid", "machine-req")
 	if err == nil {
 		t.Fatal("expected error, got nil")
