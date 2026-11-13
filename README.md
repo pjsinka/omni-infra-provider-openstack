@@ -76,6 +76,11 @@ Run the provider as a container next to your Omni instance (Podman/Quadlet):
         --network S --image S [--flavor S] [--disk-size N]
         [--extra-disks N] [--server-group S]
 
+The binary reports its build version via `--version`: `make build` stamps it
+from `git describe --tags --always --dirty` (falls back to `dev` outside a
+git checkout); the Dockerfile takes `--build-arg TAG=<version>` — the GHCR
+release workflow passes the git tag name.
+
 Credentials come from `~/.config/openstack/clouds.yaml` (application
 credential); the provider reads them itself — never commit them.
 
