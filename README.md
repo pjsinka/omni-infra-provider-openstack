@@ -145,7 +145,7 @@ runtime with CA certificates. On the target host build natively
 - [x] Guild parity: additional NICs (per-port security groups);
       system extensions flow via cluster templates (Omni-native)
 - [ ] Floating IPs, access-rule hardening, pb.go regeneration (protoc)
-- [x] Multi-arch builds (GHCR amd64/arm64), publication (v0.1.0)
+- [x] Multi-arch builds (GHCR amd64/arm64), image publication
 - [x] E2E suite (DevStack + Omni nightly pipeline, provision→assert→
       deprovision; two consecutive green runs)
 
