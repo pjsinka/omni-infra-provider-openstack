@@ -16,6 +16,10 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          # full history + tags: make build stamps the binary version via
+          # git describe, which needs the tags to resolve a release tag.
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:

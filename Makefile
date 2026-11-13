@@ -1,9 +1,12 @@
 MODULE := github.com/pjsinka/omni-infra-provider-openstack
 CMD := ./cmd/omni-infra-provider-openstack
+# Stamped into the binary via ldflags (internal/version.Tag); falls back to
+# "dev" when git is unavailable (e.g. tarball builds without a .git dir).
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 .PHONY: build
 build:
-	go build -o bin/provider $(CMD)
+	go build -ldflags "-X $(MODULE)/internal/version.Tag=$(VERSION)" -o bin/provider $(CMD)
 
 .PHONY: tidy
 tidy:
