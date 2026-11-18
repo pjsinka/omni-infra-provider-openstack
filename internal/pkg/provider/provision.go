@@ -23,7 +23,19 @@ import (
 
 // errRequestNameTooLong is returned when the machine request name exceeds
 // the Nova server name limit.
-var errRequestNameTooLong = errors.New("the machine request name can not be longer than 63 characters")
+var errRequestNameTooLong = errors.New("the machine request name can not be longer than 255 characters")
+
+// validateRequestName rejects machine request names longer than Nova's
+// 255-character server name limit. Nova would fail the server create with
+// a hard error that the provision loop wraps as retryable — an endless
+// retry. A local plain error stops the loop before it starts.
+func validateRequestName(name string) error {
+	if len(name) > 255 {
+		return errRequestNameTooLong
+	}
+
+	return nil
+}
 
 // Provisioner implements the OpenStack infra provider.
 type Provisioner struct {
@@ -41,11 +53,7 @@ func NewProvisioner(client *ospkg.Client) *Provisioner {
 func (p *Provisioner) ProvisionSteps() []provision.Step[*resources.Machine] {
 	return []provision.Step[*resources.Machine]{
 		provision.NewStep("validateRequest", func(_ context.Context, _ *zap.Logger, pctx provision.Context[*resources.Machine]) error {
-			if len(pctx.GetRequestID()) > 62 {
-				return errRequestNameTooLong
-			}
-
-			return nil
+			return validateRequestName(pctx.GetRequestID())
 		}),
 		provision.NewStep("ensureImage", func(ctx context.Context, logger *zap.Logger, pctx provision.Context[*resources.Machine]) error {
 			pctx.State.TypedSpec().Value.TalosVersion = pctx.GetTalosVersion()
