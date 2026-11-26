@@ -4,13 +4,15 @@ OpenStack infrastructure provider for [Omni](https://omni.siderolabs.com):
 provisions Talos machines as Nova servers, declaratively, driven by Omni
 machine classes.
 
-Status: **v0.2.3 released** — a Talos cluster born from OpenStack via
+Status: **v0.2.5 released** — a Talos cluster born from OpenStack via
 self-hosted Omni, surviving a full host reboot (stateless provider, state
 lives in Omni). v0.2.0 added a Cinder endpoint fallback (DevStack's
 `block-storage` service type), security-group name→ID resolution, a nightly
 DevStack E2E pipeline in CI, and transient-error retries in deprovisioning.
 v0.2.2 adds a `firmware` machine class field (`uefi`/`bios` — separate Glance
-images per boot mode); v0.2.3 stamps the real release version into the binary.
+images per boot mode); v0.2.3 stamps the real release version into the binary;
+v0.2.4 raises the Nova request name limit to 255; v0.2.5 validates the e2e
+pipeline against Omni 1.14.0.
 
 ## Highlights
 
