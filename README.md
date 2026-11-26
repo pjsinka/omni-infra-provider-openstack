@@ -93,7 +93,7 @@ Two layers, both wired into CI:
 - `make test` — hermetic Tier-1 API contract tests (gophercloud fake
   transport; no OpenStack needed); runs on every PR via `ci.yml`.
 - `make test-e2e` — Tier-2 end-to-end: a GitHub runner brings up DevStack
-  (stable/2026.2) + self-hosted Omni (v1.13.3) + this provider, then
+  (stable/2026.2) + self-hosted Omni (v1.14.0) + this provider, then
   `TestE2EProvisionDeprovision` provisions a machine through Omni
   (cluster → machine class → machine set), asserts the Nova server,
   boot volume, port and security group, deprovisions everything and waits

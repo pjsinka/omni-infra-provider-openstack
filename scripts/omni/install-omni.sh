@@ -5,9 +5,9 @@
 # OMNI_VERSION env var overrides the pinned default.
 set -euo pipefail
 
-# Pin: latest stable omni release at the time of writing (2026-11-12).
+# Pin: latest stable omni release at the time of writing (2026-11-23).
 # Bump deliberately after reviewing release notes of newer versions.
-DEFAULT_OMNI_VERSION="v1.13.3"
+DEFAULT_OMNI_VERSION="v1.14.0"
 
 WORKDIR=""
 VERSION="${OMNI_VERSION:-}"
